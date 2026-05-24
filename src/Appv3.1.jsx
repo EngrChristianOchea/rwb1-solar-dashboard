@@ -32,7 +32,7 @@ const SETUP = {
 
   // 4 × 620W = 2.48kWp
   solarArrayKw: 2.48,
-  defaultSolarHarvestEfficiency: 0.9,
+  defaultSolarHarvestEfficiency: 0.75,
 
   defaultBatteryCapacityKwh: 9.6,
   defaultReserveSocPercent: 20,
@@ -282,7 +282,7 @@ function MoreInverterInfo({ solar }) {
   const fallbackInfo = [
     ["PV Power", formatPowerW(solar?.pv_power_w)],
     ["PV Voltage", `${formatNumber(solar?.pv_voltage_v, 1)} V`],
-    ["Live Inverter Load", formatPowerKw(solar?.load_power_kw)],
+    ["Current Inverter Load", formatPowerKw(solar?.load_power_kw)],
     ["Load Percentage", `${formatNumber(solar?.load_percent, 0)}%`],
     ["Battery SOC", `${formatNumber(solar?.battery_soc_percent, 0)}%`],
     ["Battery Voltage", `${formatNumber(solar?.battery_voltage_v, 1)} V`],
@@ -634,7 +634,7 @@ export default function App() {
       const days = data.daily.time.map((date, index) => {
         const shortwaveMjM2 = Number(data.daily.shortwave_radiation_sum[index] || 0);
         const psh = shortwaveMjM2 / 3.6;
-        const expectedHarvestKwh = psh * SETUP.solarArrayKw * Number(solarHarvestEfficiency || SETUP.defaultSolarHarvestEfficiency);
+        const expectedHarvestKwh = psh * SETUP.solarArrayKw * SETUP.harvestEfficiency;
 
         return {
           date,
@@ -699,10 +699,6 @@ export default function App() {
 
   const aiSuggestion = useMemo(() => getWeatherSuggestion(weather), [weather]);
 
-  useEffect(() => {
-    fetchWeather();
-  }, [solarHarvestEfficiency]);
-
   return (
     <main className="page">
       <section className="hero">
@@ -755,12 +751,12 @@ export default function App() {
               <div className="runtime-details">
                 <span>SOC: {formatNumber(solar?.battery_soc_percent, 0)}%</span>
                 <span>Usable: {formatNumber(runtime?.usableKwh, 2)} kWh</span>
-                <span>Live Inverter Load: {formatPowerKw(activeLoadKw)}</span>
+                <span>Current Inverter Load: {formatPowerKw(activeLoadKw)}</span>
               </div>
 
               <div className="runtime-controls">
                 <label>
-                  Live Inverter Load (kW)
+                  Current Inverter Load (kW)
                   <input
                     type="number"
                     min="0"
@@ -774,7 +770,7 @@ export default function App() {
                 </label>
 
                 <label>
-                  Current Battery Capacity (kWh)
+                  Battery Capacity (kWh)
                   <input type="number" min="0" step="0.1" value={batteryCapacityKwh} onChange={(event) => setBatteryCapacityKwh(event.target.value)} />
                 </label>
 
@@ -795,7 +791,7 @@ export default function App() {
 
           <section className="stats-grid">
             <StatCard icon={<Sun size={24} />} label="PV Power" value={formatPowerW(solar?.pv_power_w)} sub="Current solar production" />
-            <StatCard icon={<Home size={24} />} label="Live Inverter Load" value={formatPowerKw(solar?.load_power_kw)} sub={`${formatNumber(solar?.load_percent, 0)}% inverter load`} />
+            <StatCard icon={<Home size={24} />} label="Current Inverter Load" value={formatPowerKw(solar?.load_power_kw)} sub={`${formatNumber(solar?.load_percent, 0)}% inverter load`} />
             <StatCard icon={<Battery size={24} />} label="Battery SOC" value={`${formatNumber(solar?.battery_soc_percent, 0)}%`} sub={`${formatNumber(solar?.battery_voltage_v, 1)} V battery`} />
             <StatCard icon={<Gauge size={24} />} label="AC Output" value={`${formatNumber(solar?.output_voltage_v, 1)} V`} sub={`${formatNumber(solar?.output_frequency_hz, 1)} Hz`} />
             <StatCard icon={<Activity size={24} />} label="Working State" value={solar?.working_state || "--"} sub={solar?.battery_state ? `Battery: ${solar.battery_state}` : "Inverter mode"} />
@@ -825,7 +821,7 @@ export default function App() {
             <StatCard icon={<Sun size={24} />} label="Tomorrow Harvest" value={`${formatNumber(weather[1]?.expectedHarvestKwh, 1)} kWh`} sub={`PSH: ${formatNumber(weather[1]?.psh, 1)} hrs • ${weather[1] ? getSolarIndex(weather[1].psh) : "--"}`} />
             <StatCard icon={<CloudSun size={24} />} label="Tomorrow Weather" value={weather[1] ? WEATHER_CODES[weather[1].code] || "Forecast" : "--"} sub={`Rain: ${weather[1]?.rain ?? "--"}%`} />
             <StatCard icon={<Thermometer size={24} />} label="Tomorrow UV Index" value={formatNumber(weather[1]?.uvIndex, 1)} sub="Higher means stronger sun exposure" />
-            <StatCard icon={<CalendarDays size={24} />} label="7-Day Harvest" value={`${formatNumber(weather.reduce((sum, day) => sum + Number(day.expectedHarvestKwh || 0), 0), 1)} kWh`} sub={`PSH × array kW × ${Math.round(Number(solarHarvestEfficiency) * 100)}% harvest efficiency`} />
+            <StatCard icon={<CalendarDays size={24} />} label="7-Day Harvest" value={`${formatNumber(weather.reduce((sum, day) => sum + Number(day.expectedHarvestKwh || 0), 0), 1)} kWh`} sub="Based on PSH × array kW × efficiency" />
           </div>
 
           <div className="weather-grid">
@@ -844,27 +840,12 @@ export default function App() {
             <div><span>Solar Panels</span><strong>{SETUP.solarPanels}</strong></div>
             <div><span>Inverter</span><strong>{SETUP.inverter}</strong></div>
             <div><span>Battery</span><strong>{SETUP.battery}</strong></div>
-            <div><span>Current Battery Capacity</span><strong>{batteryCapacityKwh} kWh</strong></div>
+            <div><span>Battery Capacity</span><strong>{batteryCapacityKwh} kWh</strong></div>
             <div><span>Reserve SOC</span><strong>{reserveSocPercent}%</strong></div>
             <div><span>Runtime Efficiency</span><strong>{Math.round(Number(inverterEfficiency) * 100)}%</strong></div>
             <div><span>Forecast Location</span><strong>{SETUP.latitude}, {SETUP.longitude}</strong></div>
             <div><span>Estimated Solar Array</span><strong>{SETUP.solarArrayKw} kWp</strong></div>
-            <div><span>Solar Harvest Efficiency</span><strong>{Math.round(Number(solarHarvestEfficiency) * 100)}%</strong></div>
-            <div>
-              <span>Adjust Solar Harvest Efficiency</span>
-              <strong>
-                <input
-                  className="inline-setup-input"
-                  type="number"
-                  min="1"
-                  max="100"
-                  step="1"
-                  value={Math.round(Number(solarHarvestEfficiency) * 100)}
-                  onChange={(event) => setSolarHarvestEfficiency(Number(event.target.value) / 100)}
-                />%
-              </strong>
-            </div>
-            <div><span>Harvest Formula</span><strong>PSH × kWp × harvest efficiency</strong></div>
+            <div><span>Harvest Formula</span><strong>PSH × kWp × efficiency</strong></div>
           </div>
         </section>
       )}

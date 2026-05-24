@@ -9,14 +9,11 @@ import {
   Database,
   Gauge,
   Home,
-  Moon,
   RefreshCcw,
   Settings,
   Sparkles,
   Sun,
-  SunMedium,
   Thermometer,
-  TrendingUp,
   Zap
 } from "lucide-react";
 
@@ -30,14 +27,12 @@ const SETUP = {
   inverter: "48V hybrid off-grid inverter",
   battery: "48V / 200Ah LiFePO₄ battery",
 
-  // 4 × 620W = 2.48kWp
   solarArrayKw: 2.48,
-  defaultSolarHarvestEfficiency: 0.9,
+  harvestEfficiency: 0.75,
 
   defaultBatteryCapacityKwh: 9.6,
   defaultReserveSocPercent: 20,
-  defaultInverterEfficiency: 0.95,
-  defaultElectricityRatePhp: 12
+  defaultInverterEfficiency: 0.95
 };
 
 const WEATHER_CODES = {
@@ -61,20 +56,9 @@ const WEATHER_CODES = {
   99: "Severe thunderstorm"
 };
 
-const STORAGE_KEYS = {
-  theme: "rwb1ThemeMode",
-  savingsRecords: "rwb1SavingsRecordsV1",
-  savingsSamples: "rwb1SavingsSamplesV1"
-};
-
 function formatNumber(value, digits = 1) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) return "--";
   return Number(value).toFixed(digits);
-}
-
-function formatPeso(value) {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) return "--";
-  return `₱${Number(value).toFixed(2)}`;
 }
 
 function formatPowerKw(value) {
@@ -95,45 +79,8 @@ function formatRuntime(hours) {
   return `${h} hr ${m} min`;
 }
 
-function readJsonStorage(key, fallback) {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function writeJsonStorage(key, value) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    // Ignore storage errors, usually private browsing or quota limits.
-  }
-}
-
-function getPhilippinesDateParts(date = new Date()) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Manila",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false
-  }).formatToParts(date);
-
-  const map = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-
-  return {
-    dateKey: `${map.year}-${map.month}-${map.day}`,
-    hour: Number(map.hour),
-    minute: Number(map.minute)
-  };
-}
-
-function getSolarIndex(psh) {
-  const value = Number(psh || 0);
+function getSolarIndex(shortwaveKwh) {
+  const value = Number(shortwaveKwh || 0);
   if (value >= 6) return "Excellent";
   if (value >= 4.5) return "Good";
   if (value >= 3) return "Fair";
@@ -147,25 +94,25 @@ function getWeatherSuggestion(weather) {
   }
 
   const tomorrow = weather[1] || weather[0];
-  const solarIndex = getSolarIndex(tomorrow.psh);
+  const solarIndex = getSolarIndex(tomorrow.sunKwh);
   const rain = Number(tomorrow.rain || 0);
   const harvest = Number(tomorrow.expectedHarvestKwh || 0);
   const uv = Number(tomorrow.uvIndex || 0);
   const desc = WEATHER_CODES[tomorrow.code] || "forecasted weather";
 
   if (solarIndex === "Excellent" || solarIndex === "Good") {
-    return `Tomorrow looks ${desc.toLowerCase()} with ${solarIndex.toLowerCase()} solar potential. PSH is around ${formatNumber(tomorrow.psh, 1)} hours and expected harvest is around ${formatNumber(harvest, 1)} kWh, so you can maximize daytime battery charging and shift heavier loads to sunny hours.`;
+    return `Tomorrow looks ${desc.toLowerCase()} with ${solarIndex.toLowerCase()} solar potential. Expected harvest is around ${formatNumber(harvest, 1)} kWh, so you can maximize daytime battery charging and shift heavier loads to sunny hours.`;
   }
 
   if (rain >= 60) {
-    return `Rain chance tomorrow is high at ${formatNumber(rain, 0)}%. PSH is around ${formatNumber(tomorrow.psh, 1)} hours and expected harvest is only around ${formatNumber(harvest, 1)} kWh, so conserve battery overnight and avoid unnecessary heavy loads if solar charging is weak.`;
+    return `Rain chance tomorrow is high at ${formatNumber(rain, 0)}%. Expected harvest is only around ${formatNumber(harvest, 1)} kWh, so conserve battery overnight and avoid unnecessary heavy loads if solar charging is weak.`;
   }
 
   if (uv >= 8 && harvest >= 8) {
-    return `Tomorrow has strong sun exposure with UV index around ${formatNumber(uv, 1)}. PSH is around ${formatNumber(tomorrow.psh, 1)} hours, so charging is likely good. Keep batteries/equipment away from hot areas and use daytime solar for larger loads.`;
+    return `Tomorrow has strong sun exposure with UV index around ${formatNumber(uv, 1)}. Charging is likely good, but avoid placing batteries/equipment in hot areas and use daytime solar for larger loads.`;
   }
 
-  return `Tomorrow's solar potential is ${solarIndex.toLowerCase()} with PSH around ${formatNumber(tomorrow.psh, 1)} hours and estimated harvest around ${formatNumber(harvest, 1)} kWh. Normal battery usage should be okay, but monitor SOC before running heavy loads at night.`;
+  return `Tomorrow's solar potential is ${solarIndex.toLowerCase()} with estimated harvest around ${formatNumber(harvest, 1)} kWh. Normal battery usage should be okay, but monitor SOC before running heavy loads at night.`;
 }
 
 function StatCard({ icon, label, value, sub }) {
@@ -206,10 +153,10 @@ function WeatherCard({ day }) {
       </div>
       <div className="weather-desc">{WEATHER_CODES[day.code] || "Forecast"}</div>
       <div className="weather-rain">Rain: {day.rain ?? 0}%</div>
-      <div className="weather-solar">PSH: {formatNumber(day.psh, 1)} hrs</div>
+      <div className="weather-solar">Solar energy: {formatNumber(day.sunKwh, 1)} kWh/m²</div>
       <div className="weather-solar">Expected harvest: {formatNumber(day.expectedHarvestKwh, 1)} kWh</div>
       <div className="weather-solar">UV Index: {formatNumber(day.uvIndex, 1)}</div>
-      <div className="weather-solar">Solar Index: {getSolarIndex(day.psh)}</div>
+      <div className="weather-solar">Solar Index: {getSolarIndex(day.sunKwh)}</div>
     </div>
   );
 }
@@ -282,7 +229,7 @@ function MoreInverterInfo({ solar }) {
   const fallbackInfo = [
     ["PV Power", formatPowerW(solar?.pv_power_w)],
     ["PV Voltage", `${formatNumber(solar?.pv_voltage_v, 1)} V`],
-    ["Live Inverter Load", formatPowerKw(solar?.load_power_kw)],
+    ["Current Inverted Load", formatPowerKw(solar?.load_power_kw)],
     ["Load Percentage", `${formatNumber(solar?.load_percent, 0)}%`],
     ["Battery SOC", `${formatNumber(solar?.battery_soc_percent, 0)}%`],
     ["Battery Voltage", `${formatNumber(solar?.battery_voltage_v, 1)} V`],
@@ -353,215 +300,8 @@ function MoreInverterInfo({ solar }) {
   );
 }
 
-function SavingsLineChart({ records }) {
-  const chartRecords = records.slice(-30);
-  const width = 680;
-  const height = 260;
-  const pad = 34;
-
-  if (chartRecords.length === 0) {
-    return <div className="empty-chart">No savings records yet. Keep the dashboard running and it will record after 8:00 AM PH time.</div>;
-  }
-
-  const maxKwh = Math.max(...chartRecords.map((item) => Number(item.dailyKwh || 0)), 1);
-  const maxSavings = Math.max(...chartRecords.map((item) => Number(item.savingsPhp || 0)), 1);
-  const xStep = chartRecords.length > 1 ? (width - pad * 2) / (chartRecords.length - 1) : 0;
-
-  const pointFor = (item, index, type) => {
-    const max = type === "kwh" ? maxKwh : maxSavings;
-    const value = Number(type === "kwh" ? item.dailyKwh : item.savingsPhp) || 0;
-    const x = pad + index * xStep;
-    const y = height - pad - (value / max) * (height - pad * 2);
-    return `${x},${y}`;
-  };
-
-  const kwhPoints = chartRecords.map((item, index) => pointFor(item, index, "kwh")).join(" ");
-  const savingsPoints = chartRecords.map((item, index) => pointFor(item, index, "savings")).join(" ");
-
-  return (
-    <div className="chart-wrap">
-      <svg className="savings-chart" viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Electricity savings line graph">
-        <line x1={pad} y1={height - pad} x2={width - pad} y2={height - pad} className="chart-axis" />
-        <line x1={pad} y1={pad} x2={pad} y2={height - pad} className="chart-axis" />
-
-        {[0.25, 0.5, 0.75].map((ratio) => (
-          <line
-            key={ratio}
-            x1={pad}
-            y1={height - pad - ratio * (height - pad * 2)}
-            x2={width - pad}
-            y2={height - pad - ratio * (height - pad * 2)}
-            className="chart-grid-line"
-          />
-        ))}
-
-        <polyline points={kwhPoints} className="chart-line line-kwh" />
-        <polyline points={savingsPoints} className="chart-line line-savings" />
-
-        {chartRecords.map((item, index) => {
-          const [kx, ky] = pointFor(item, index, "kwh").split(",").map(Number);
-          const [sx, sy] = pointFor(item, index, "savings").split(",").map(Number);
-          return (
-            <g key={item.dateKey}>
-              <circle cx={kx} cy={ky} r="4" className="chart-dot dot-kwh" />
-              <circle cx={sx} cy={sy} r="4" className="chart-dot dot-savings" />
-            </g>
-          );
-        })}
-      </svg>
-      <div className="chart-legend">
-        <span><i className="legend-kwh" /> Daily kWh</span>
-        <span><i className="legend-savings" /> Daily Savings</span>
-      </div>
-    </div>
-  );
-}
-
-function ElectricitySavingsPage({ solar }) {
-  const [electricityRate, setElectricityRate] = useState(SETUP.defaultElectricityRatePhp);
-  const [records, setRecords] = useState(() => readJsonStorage(STORAGE_KEYS.savingsRecords, []));
-  const [samples, setSamples] = useState(() => readJsonStorage(STORAGE_KEYS.savingsSamples, {}));
-
-  useEffect(() => {
-    const loadKw = Number(solar?.load_power_kw);
-    if (!Number.isFinite(loadKw) || loadKw < 0) return;
-
-    const { dateKey, hour } = getPhilippinesDateParts();
-    const currentSamples = readJsonStorage(STORAGE_KEYS.savingsSamples, {});
-    const todaySamples = Array.isArray(currentSamples[dateKey]) ? currentSamples[dateKey] : [];
-
-    const lastSample = todaySamples[todaySamples.length - 1];
-    const now = Date.now();
-
-    if (!lastSample || now - lastSample.timestamp > 5 * 60 * 1000) {
-      todaySamples.push({ timestamp: now, loadKw });
-      currentSamples[dateKey] = todaySamples.slice(-288);
-      writeJsonStorage(STORAGE_KEYS.savingsSamples, currentSamples);
-      setSamples(currentSamples);
-    }
-
-    if (hour >= 8) {
-      const existingRecords = readJsonStorage(STORAGE_KEYS.savingsRecords, []);
-      const alreadyRecorded = existingRecords.some((item) => item.dateKey === dateKey);
-      const daySamples = currentSamples[dateKey] || [];
-
-      if (!alreadyRecorded && daySamples.length > 0) {
-        const averageLoadKw = daySamples.reduce((sum, item) => sum + Number(item.loadKw || 0), 0) / daySamples.length;
-        const dailyKwh = averageLoadKw * 24;
-        const savingsPhp = dailyKwh * Number(electricityRate || SETUP.defaultElectricityRatePhp);
-
-        const nextRecords = [
-          ...existingRecords,
-          {
-            dateKey,
-            recordedAt: new Date().toISOString(),
-            sampleCount: daySamples.length,
-            averageLoadKw,
-            dailyKwh,
-            electricityRatePhp: Number(electricityRate || SETUP.defaultElectricityRatePhp),
-            savingsPhp
-          }
-        ].slice(-60);
-
-        writeJsonStorage(STORAGE_KEYS.savingsRecords, nextRecords);
-        setRecords(nextRecords);
-      } else {
-        setRecords(existingRecords);
-      }
-    }
-  }, [solar, electricityRate]);
-
-  const savingsSummary = useMemo(() => {
-    const totalKwh = records.reduce((sum, item) => sum + Number(item.dailyKwh || 0), 0);
-    const totalSavings = records.reduce((sum, item) => sum + Number(item.savingsPhp || 0), 0);
-    const averageDailyKwh = records.length ? totalKwh / records.length : 0;
-    const averageDailySavings = records.length ? totalSavings / records.length : 0;
-    const projection30DaySavings = averageDailySavings * 30;
-    const projection30DayKwh = averageDailyKwh * 30;
-
-    return {
-      totalKwh,
-      totalSavings,
-      averageDailyKwh,
-      averageDailySavings,
-      projection30DaySavings,
-      projection30DayKwh
-    };
-  }, [records]);
-
-  const todayKey = getPhilippinesDateParts().dateKey;
-  const todaySamples = samples[todayKey] || [];
-  const liveLoadKw = Number(solar?.load_power_kw || 0);
-  const liveDailyKwh = liveLoadKw * 24;
-  const liveDailySavings = liveDailyKwh * Number(electricityRate || 0);
-
-  return (
-    <section className="panel savings-page">
-      <div className="panel-header savings-header">
-        <div>
-          <div className="panel-title">Electricity Savings</div>
-          <p>Average load is recorded once per day after 8:00 AM PH time when the dashboard is open.</p>
-        </div>
-        <label className="rate-control">
-          Electricity Rate (₱/kWh)
-          <input
-            type="number"
-            min="0"
-            step="0.1"
-            value={electricityRate}
-            onChange={(event) => setElectricityRate(event.target.value)}
-          />
-        </label>
-      </div>
-
-      <div className="savings-summary-grid">
-        <StatCard icon={<Zap size={24} />} label="Live Daily Energy" value={`${formatNumber(liveDailyKwh, 2)} kWh`} sub={`Based on current load: ${formatPowerKw(liveLoadKw)}`} />
-        <StatCard icon={<Bolt size={24} />} label="Live Daily Savings" value={formatPeso(liveDailySavings)} sub={`At ₱${formatNumber(electricityRate, 2)}/kWh`} />
-        <StatCard icon={<Activity size={24} />} label="Recorded Total kWh" value={`${formatNumber(savingsSummary.totalKwh, 2)} kWh`} sub={`${records.length} recorded day(s)`} />
-        <StatCard icon={<TrendingUp size={24} />} label="30-Day Projection" value={formatPeso(savingsSummary.projection30DaySavings)} sub={`${formatNumber(savingsSummary.projection30DayKwh, 1)} kWh projected`} />
-      </div>
-
-      <SavingsLineChart records={records} />
-
-      <div className="savings-table-wrap">
-        <table className="info-table savings-table">
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Average Load</th>
-              <th>Total kWh</th>
-              <th>Rate</th>
-              <th>Savings</th>
-              <th>Samples</th>
-            </tr>
-          </thead>
-          <tbody>
-            {records.length === 0 ? (
-              <tr>
-                <td colSpan="6">No records yet. Current sample count today: {todaySamples.length}</td>
-              </tr>
-            ) : (
-              records.slice().reverse().map((item) => (
-                <tr key={item.dateKey}>
-                  <td>{item.dateKey}</td>
-                  <td>{formatPowerKw(item.averageLoadKw)}</td>
-                  <td>{formatNumber(item.dailyKwh, 2)} kWh</td>
-                  <td>₱{formatNumber(item.electricityRatePhp, 2)}</td>
-                  <td>{formatPeso(item.savingsPhp)}</td>
-                  <td>{item.sampleCount}</td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  );
-}
-
 export default function App() {
   const [activePage, setActivePage] = useState("dashboard");
-  const [theme, setTheme] = useState(() => localStorage.getItem(STORAGE_KEYS.theme) || "dark");
   const [solar, setSolar] = useState(null);
   const [weather, setWeather] = useState([]);
   const [solarError, setSolarError] = useState("");
@@ -572,14 +312,8 @@ export default function App() {
   const [batteryCapacityKwh, setBatteryCapacityKwh] = useState(SETUP.defaultBatteryCapacityKwh);
   const [reserveSocPercent, setReserveSocPercent] = useState(SETUP.defaultReserveSocPercent);
   const [inverterEfficiency, setInverterEfficiency] = useState(SETUP.defaultInverterEfficiency);
-  const [solarHarvestEfficiency, setSolarHarvestEfficiency] = useState(SETUP.defaultSolarHarvestEfficiency);
   const [useLiveLoad, setUseLiveLoad] = useState(true);
   const [manualLoadKw, setManualLoadKw] = useState("");
-
-  useEffect(() => {
-    document.body.classList.toggle("light-mode", theme === "light");
-    localStorage.setItem(STORAGE_KEYS.theme, theme);
-  }, [theme]);
 
   async function fetchSolar() {
     try {
@@ -624,7 +358,10 @@ export default function App() {
         forecast_days: "7"
       });
 
-      const response = await fetch(`https://api.open-meteo.com/v1/forecast?${params.toString()}`);
+      const response = await fetch(
+        `https://api.open-meteo.com/v1/forecast?${params.toString()}`
+      );
+
       const data = await response.json();
 
       if (!response.ok) {
@@ -632,9 +369,8 @@ export default function App() {
       }
 
       const days = data.daily.time.map((date, index) => {
-        const shortwaveMjM2 = Number(data.daily.shortwave_radiation_sum[index] || 0);
-        const psh = shortwaveMjM2 / 3.6;
-        const expectedHarvestKwh = psh * SETUP.solarArrayKw * Number(solarHarvestEfficiency || SETUP.defaultSolarHarvestEfficiency);
+        const sunKwh = data.daily.shortwave_radiation_sum[index];
+        const expectedHarvestKwh = Number(sunKwh || 0) * SETUP.solarArrayKw * SETUP.harvestEfficiency;
 
         return {
           date,
@@ -642,8 +378,7 @@ export default function App() {
           tMax: data.daily.temperature_2m_max[index],
           tMin: data.daily.temperature_2m_min[index],
           rain: data.daily.precipitation_probability_max[index],
-          shortwaveMjM2,
-          psh,
+          sunKwh,
           uvIndex: data.daily.uv_index_max[index],
           expectedHarvestKwh
         };
@@ -699,38 +434,38 @@ export default function App() {
 
   const aiSuggestion = useMemo(() => getWeatherSuggestion(weather), [weather]);
 
-  useEffect(() => {
-    fetchWeather();
-  }, [solarHarvestEfficiency]);
-
   return (
     <main className="page">
       <section className="hero">
         <div>
           <div className="eyebrow">Solar IoT Dashboard</div>
           <h1>{SETUP.name}</h1>
-          <p>Live solar logger data, weather forecast, battery runtime estimate, animated power flow, and savings tracking.</p>
+          <p>
+            Live solar logger data, weather forecast, battery runtime estimate,
+            and animated power flow.
+          </p>
           <div className="maker-credit">Made by Engr. Christian Louie Ethance Ochea, ECT</div>
         </div>
 
-        <div className="hero-actions">
-          <button className="refresh-btn" onClick={() => setTheme(theme === "light" ? "dark" : "light")}>
-            {theme === "light" ? <Moon size={18} /> : <SunMedium size={18} />}
-            {theme === "light" ? "Dark Mode" : "Light Mode"}
-          </button>
-          <button className="refresh-btn" onClick={fetchSolar} disabled={loadingSolar}>
-            <RefreshCcw size={18} className={loadingSolar ? "spin" : ""} />
-            Refresh
-          </button>
-        </div>
+        <button className="refresh-btn" onClick={fetchSolar} disabled={loadingSolar}>
+          <RefreshCcw size={18} className={loadingSolar ? "spin" : ""} />
+          Refresh
+        </button>
       </section>
 
       <nav className="tabs">
-        <TabButton active={activePage === "dashboard"} icon={<Activity size={18} />} onClick={() => setActivePage("dashboard")}>Dashboard</TabButton>
-        <TabButton active={activePage === "weather"} icon={<CloudSun size={18} />} onClick={() => setActivePage("weather")}>Weather Forecast</TabButton>
-        <TabButton active={activePage === "savings"} icon={<TrendingUp size={18} />} onClick={() => setActivePage("savings")}>Electricity Savings</TabButton>
-        <TabButton active={activePage === "more"} icon={<Database size={18} />} onClick={() => setActivePage("more")}>More Inverter Info</TabButton>
-        <TabButton active={activePage === "setup"} icon={<Settings size={18} />} onClick={() => setActivePage("setup")}>Setup</TabButton>
+        <TabButton active={activePage === "dashboard"} icon={<Activity size={18} />} onClick={() => setActivePage("dashboard")}>
+          Dashboard
+        </TabButton>
+        <TabButton active={activePage === "weather"} icon={<CloudSun size={18} />} onClick={() => setActivePage("weather")}>
+          Weather Forecast
+        </TabButton>
+        <TabButton active={activePage === "more"} icon={<Database size={18} />} onClick={() => setActivePage("more")}>
+          More Inverter Info
+        </TabButton>
+        <TabButton active={activePage === "setup"} icon={<Settings size={18} />} onClick={() => setActivePage("setup")}>
+          Setup
+        </TabButton>
       </nav>
 
       {solarError && <div className="error-box">Solar data error: {solarError}</div>}
@@ -745,22 +480,29 @@ export default function App() {
 
             <div className="panel runtime-panel">
               <div className="panel-title">Battery Runtime Estimate</div>
+
               <div className="runtime-big">{runtime ? formatRuntime(runtime.hours) : "--"}</div>
-              <p>Estimated time from current battery SOC down to <strong>{reserveSocPercent}%</strong> reserve.</p>
+
+              <p>
+                Estimated time from current battery SOC down to <strong>{reserveSocPercent}%</strong> reserve.
+              </p>
 
               <div className="runtime-meter">
-                <div className="runtime-fill" style={{ width: `${Math.min(Math.max(Number(solar?.battery_soc_percent || 0), 0), 100)}%` }} />
+                <div
+                  className="runtime-fill"
+                  style={{ width: `${Math.min(Math.max(Number(solar?.battery_soc_percent || 0), 0), 100)}%` }}
+                />
               </div>
 
               <div className="runtime-details">
                 <span>SOC: {formatNumber(solar?.battery_soc_percent, 0)}%</span>
                 <span>Usable: {formatNumber(runtime?.usableKwh, 2)} kWh</span>
-                <span>Live Inverter Load: {formatPowerKw(activeLoadKw)}</span>
+                <span>Current Inverter Load: {formatPowerKw(activeLoadKw)}</span>
               </div>
 
               <div className="runtime-controls">
                 <label>
-                  Live Inverter Load (kW)
+                  Current Inverter Load (kW)
                   <input
                     type="number"
                     min="0"
@@ -773,21 +515,43 @@ export default function App() {
                   />
                 </label>
 
-                <label>
-                  Current Battery Capacity (kWh)
-                  <input type="number" min="0" step="0.1" value={batteryCapacityKwh} onChange={(event) => setBatteryCapacityKwh(event.target.value)} />
-                </label>
+                <button className="mini-btn" type="button" onClick={() => setUseLiveLoad(true)}>
+                  Use Live Solar Load
+                </button>
 
-                <button className="mini-btn" type="button" onClick={() => setUseLiveLoad(true)}>Use Live Solar Load</button>
+                <label>
+                  Battery Capacity (kWh)
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.1"
+                    value={batteryCapacityKwh}
+                    onChange={(event) => setBatteryCapacityKwh(event.target.value)}
+                  />
+                </label>
 
                 <label>
                   Reserve SOC (%)
-                  <input type="number" min="0" max="100" step="1" value={reserveSocPercent} onChange={(event) => setReserveSocPercent(event.target.value)} />
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="1"
+                    value={reserveSocPercent}
+                    onChange={(event) => setReserveSocPercent(event.target.value)}
+                  />
                 </label>
 
                 <label>
                   Runtime Efficiency (%)
-                  <input type="number" min="1" max="100" step="1" value={Math.round(Number(inverterEfficiency) * 100)} onChange={(event) => setInverterEfficiency(Number(event.target.value) / 100)} />
+                  <input
+                    type="number"
+                    min="1"
+                    max="100"
+                    step="1"
+                    value={Math.round(Number(inverterEfficiency) * 100)}
+                    onChange={(event) => setInverterEfficiency(Number(event.target.value) / 100)}
+                  />
                 </label>
               </div>
             </div>
@@ -795,7 +559,7 @@ export default function App() {
 
           <section className="stats-grid">
             <StatCard icon={<Sun size={24} />} label="PV Power" value={formatPowerW(solar?.pv_power_w)} sub="Current solar production" />
-            <StatCard icon={<Home size={24} />} label="Live Inverter Load" value={formatPowerKw(solar?.load_power_kw)} sub={`${formatNumber(solar?.load_percent, 0)}% inverter load`} />
+            <StatCard icon={<Home size={24} />} label="Current Inverter Load" value={formatPowerKw(solar?.load_power_kw)} sub={`${formatNumber(solar?.load_percent, 0)}% inverter load`} />
             <StatCard icon={<Battery size={24} />} label="Battery SOC" value={`${formatNumber(solar?.battery_soc_percent, 0)}%`} sub={`${formatNumber(solar?.battery_voltage_v, 1)} V battery`} />
             <StatCard icon={<Gauge size={24} />} label="AC Output" value={`${formatNumber(solar?.output_voltage_v, 1)} V`} sub={`${formatNumber(solar?.output_frequency_hz, 1)} Hz`} />
             <StatCard icon={<Activity size={24} />} label="Working State" value={solar?.working_state || "--"} sub={solar?.battery_state ? `Battery: ${solar.battery_state}` : "Inverter mode"} />
@@ -822,10 +586,10 @@ export default function App() {
           </div>
 
           <div className="weather-summary-grid">
-            <StatCard icon={<Sun size={24} />} label="Tomorrow Harvest" value={`${formatNumber(weather[1]?.expectedHarvestKwh, 1)} kWh`} sub={`PSH: ${formatNumber(weather[1]?.psh, 1)} hrs • ${weather[1] ? getSolarIndex(weather[1].psh) : "--"}`} />
+            <StatCard icon={<Sun size={24} />} label="Tomorrow Harvest" value={`${formatNumber(weather[1]?.expectedHarvestKwh, 1)} kWh`} sub={`Solar Index: ${weather[1] ? getSolarIndex(weather[1].sunKwh) : "--"}`} />
             <StatCard icon={<CloudSun size={24} />} label="Tomorrow Weather" value={weather[1] ? WEATHER_CODES[weather[1].code] || "Forecast" : "--"} sub={`Rain: ${weather[1]?.rain ?? "--"}%`} />
             <StatCard icon={<Thermometer size={24} />} label="Tomorrow UV Index" value={formatNumber(weather[1]?.uvIndex, 1)} sub="Higher means stronger sun exposure" />
-            <StatCard icon={<CalendarDays size={24} />} label="7-Day Harvest" value={`${formatNumber(weather.reduce((sum, day) => sum + Number(day.expectedHarvestKwh || 0), 0), 1)} kWh`} sub={`PSH × array kW × ${Math.round(Number(solarHarvestEfficiency) * 100)}% harvest efficiency`} />
+            <StatCard icon={<CalendarDays size={24} />} label="7-Day Harvest" value={`${formatNumber(weather.reduce((sum, day) => sum + Number(day.expectedHarvestKwh || 0), 0), 1)} kWh`} sub="Estimated total solar harvest" />
           </div>
 
           <div className="weather-grid">
@@ -834,37 +598,21 @@ export default function App() {
         </section>
       )}
 
-      {activePage === "savings" && <ElectricitySavingsPage solar={solar} />}
       {activePage === "more" && <MoreInverterInfo solar={solar} />}
 
       {activePage === "setup" && (
         <section className="panel setup-panel">
           <div className="panel-title">Setup Info</div>
+
           <div className="setup-grid">
             <div><span>Solar Panels</span><strong>{SETUP.solarPanels}</strong></div>
             <div><span>Inverter</span><strong>{SETUP.inverter}</strong></div>
             <div><span>Battery</span><strong>{SETUP.battery}</strong></div>
-            <div><span>Current Battery Capacity</span><strong>{batteryCapacityKwh} kWh</strong></div>
+            <div><span>Battery Capacity</span><strong>{batteryCapacityKwh} kWh</strong></div>
             <div><span>Reserve SOC</span><strong>{reserveSocPercent}%</strong></div>
             <div><span>Runtime Efficiency</span><strong>{Math.round(Number(inverterEfficiency) * 100)}%</strong></div>
             <div><span>Forecast Location</span><strong>{SETUP.latitude}, {SETUP.longitude}</strong></div>
             <div><span>Estimated Solar Array</span><strong>{SETUP.solarArrayKw} kWp</strong></div>
-            <div><span>Solar Harvest Efficiency</span><strong>{Math.round(Number(solarHarvestEfficiency) * 100)}%</strong></div>
-            <div>
-              <span>Adjust Solar Harvest Efficiency</span>
-              <strong>
-                <input
-                  className="inline-setup-input"
-                  type="number"
-                  min="1"
-                  max="100"
-                  step="1"
-                  value={Math.round(Number(solarHarvestEfficiency) * 100)}
-                  onChange={(event) => setSolarHarvestEfficiency(Number(event.target.value) / 100)}
-                />%
-              </strong>
-            </div>
-            <div><span>Harvest Formula</span><strong>PSH × kWp × harvest efficiency</strong></div>
           </div>
         </section>
       )}
@@ -872,7 +620,10 @@ export default function App() {
       <footer>
         <div>Made by Engr. Christian Louie Ethance Ochea, ECT</div>
         <div>
-          Last refresh: {lastRefresh ? lastRefresh.toLocaleString("en-PH", { dateStyle: "medium", timeStyle: "medium" }) : "--"}
+          Last refresh:{" "}
+          {lastRefresh
+            ? lastRefresh.toLocaleString("en-PH", { dateStyle: "medium", timeStyle: "medium" })
+            : "--"}
         </div>
       </footer>
     </main>

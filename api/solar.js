@@ -1,253 +1,301 @@
-const SOLAR_URL = "https://solar.siseli.com/apis/deviceState/simple/energy/flow/v1";
+import dotenv from "dotenv";
+import CryptoJS from "crypto-js";
 
-function normalizeKey(value) {
-  return String(value || "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-}
+dotenv.config({ path: ".env.local" });
 
-function parseNumber(value) {
-  if (value === null || value === undefined) return null;
-  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+let cachedToken = null;
+let cachedTokenExpiry = 0;
 
-  const match = String(value).match(/-?\d+(\.\d+)?/);
-  return match ? Number(match[0]) : null;
-}
+const OPEN_APP_ID = "rBrTRfAPXz";
+const ENCRYPTED_OPEN_APP_SECRET =
+  "I4D0KRr2339z3pQ/at91V9BpFAOe54DaTafwSm6suIQ=";
 
-function extractFlatValues(input, output = {}) {
-  if (!input || typeof input !== "object") return output;
+function randomNonce(length = 32) {
+  const chars =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  let result = "";
 
-  if (Array.isArray(input)) {
-    for (const item of input) extractFlatValues(item, output);
-    return output;
+  for (let i = 0; i < length; i++) {
+    result += chars[Math.floor(Math.random() * chars.length)];
   }
 
-  const possibleName =
-    input.name ||
-    input.fieldName ||
-    input.field ||
-    input.label ||
-    input.title ||
-    input.key ||
-    input.code;
+  return result;
+}
 
-  const possibleValue =
-    input.value ??
-    input.val ??
-    input.data ??
-    input.currentValue ??
-    input.realValue ??
-    input.displayValue;
+function decryptOpenSecret(appId, encryptedSecret) {
+  const md5 = CryptoJS.MD5(appId).toString().toLowerCase();
 
-  if (possibleName && possibleValue !== undefined && typeof possibleValue !== "object") {
-    output[normalizeKey(possibleName)] = possibleValue;
+  const keyText = md5.substring(0, 16);
+  const ivText = md5.substring(16);
+
+  const key = CryptoJS.enc.Utf8.parse(keyText);
+  const iv = CryptoJS.enc.Utf8.parse(ivText);
+
+  const decrypted = CryptoJS.AES.decrypt(encryptedSecret, key, {
+    mode: CryptoJS.mode.CBC,
+    padding: CryptoJS.pad.ZeroPadding,
+    iv
+  });
+
+  return decrypted.toString(CryptoJS.enc.Utf8).trim();
+}
+
+function sortObject(obj) {
+  return Object.keys(obj)
+    .sort()
+    .reduce((result, key) => {
+      result[key] = obj[key];
+      return result;
+    }, {});
+}
+
+function stringifyQueryNoEncode(obj) {
+  return Object.entries(obj)
+    .map(([key, value]) => `${key}=${value}`)
+    .join("&");
+}
+
+function getBodyHash(method, bodyString) {
+  if (method.toUpperCase() === "GET") {
+    return "";
   }
 
-  for (const [key, value] of Object.entries(input)) {
-    if (value !== null && typeof value !== "object") {
-      output[normalizeKey(key)] = value;
-    } else {
-      extractFlatValues(value, output);
+  if (!bodyString || typeof bodyString !== "string") {
+    return "";
+  }
+
+  return CryptoJS.SHA256(CryptoJS.enc.Utf8.parse(bodyString))
+    .toString()
+    .toLowerCase();
+}
+
+function makeOpenHeaders({ url, method, bodyString }) {
+  const nonce = randomNonce(32);
+
+  const signParams = {};
+
+  const parsedUrl = new URL(url);
+
+  for (const [key, value] of parsedUrl.searchParams.entries()) {
+    if (
+      key !== "IOT-Open-AppID" &&
+      key !== "IOT-Open-Nonce" &&
+      key !== "IOT-Open-Sign" &&
+      key !== "IOT-Open-Body-Hash"
+    ) {
+      signParams[key] = value;
     }
   }
 
-  return output;
+  signParams["IOT-Open-Body-Hash"] = getBodyHash(method, bodyString);
+  signParams["IOT-Open-AppID"] = OPEN_APP_ID;
+  signParams["IOT-Open-Nonce"] = nonce;
+
+  const sortedParams = sortObject(signParams);
+  const queryString = stringifyQueryNoEncode(sortedParams);
+
+const queryBase64 = CryptoJS.enc.Base64.stringify(
+  CryptoJS.enc.Utf8.parse(queryString)
+);
+
+const openSecret = decryptOpenSecret(
+  OPEN_APP_ID,
+  ENCRYPTED_OPEN_APP_SECRET
+);
+
+const hmac = CryptoJS.HmacSHA256(queryBase64, openSecret);
+const sign = CryptoJS.MD5(hmac).toString().toLowerCase();
+
+  return {
+    "IOT-Open-AppID": OPEN_APP_ID,
+    "IOT-Open-Nonce": nonce,
+    "IOT-Open-Sign": sign
+  };
 }
 
-function pickNumber(flat, keys) {
-  for (const key of keys) {
-    const normalized = normalizeKey(key);
-    if (flat[normalized] !== undefined) {
-      const value = parseNumber(flat[normalized]);
-      if (value !== null) return value;
-    }
+function getField(fields, key, fallback = null) {
+  const field = fields?.[key];
+
+  if (!field) return fallback;
+
+  if (field.value !== undefined && field.value !== null) {
+    return field.value;
   }
-  return null;
+
+  if (field.valueDisplay !== undefined && field.valueDisplay !== null) {
+    return field.valueDisplay;
+  }
+
+  return fallback;
 }
 
-function pickText(flat, keys) {
-  for (const key of keys) {
-    const normalized = normalizeKey(key);
-    if (flat[normalized] !== undefined) {
-      return String(flat[normalized]);
-    }
+function getDisplay(fields, key, fallback = "--") {
+  return fields?.[key]?.valueDisplay ?? fallback;
+}
+
+async function loginToSolarOfThings() {
+  const account = process.env.SOT_ACCOUNT;
+  const password = process.env.SOT_PASSWORD_HASH;
+
+  if (!account || !password) {
+    throw new Error(
+      "Missing SOT_ACCOUNT or SOT_PASSWORD_HASH in environment variables."
+    );
   }
-  return null;
+
+  const url = "https://solar.siseli.com/apis/login/account";
+
+  const bodyString = JSON.stringify({
+    account,
+    password
+  });
+
+  const openHeaders = makeOpenHeaders({
+    url,
+    method: "POST",
+    bodyString
+  });
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Accept-Language": "en-US",
+      "Content-Type": "application/json; charset=utf-8",
+
+      ...openHeaders,
+
+      "IOT-Time-Zone": "Asia/Singapore",
+      "IOT-Token": "null",
+      Origin: "https://solar.siseli.com",
+      Referer: "https://solar.siseli.com/",
+      "User-Agent": "Mozilla/5.0"
+    },
+    body: bodyString
+  });
+
+  const json = await response.json();
+
+  if (!response.ok || json.code !== 0) {
+    throw new Error(json.message || "Solar of Things login failed.");
+  }
+
+  const accessToken = json?.data?.accessToken;
+  const expiresAt = json?.data?.accessTokenWillExpiredAt;
+
+  if (!accessToken) {
+    throw new Error("Login succeeded, but no accessToken was returned.");
+  }
+
+  cachedToken = accessToken;
+  cachedTokenExpiry = expiresAt
+    ? new Date(expiresAt).getTime()
+    : Date.now() + 60 * 60 * 1000;
+
+  return accessToken;
+}
+
+async function getValidToken() {
+  const now = Date.now();
+
+  if (cachedToken && now < cachedTokenExpiry - 5 * 60 * 1000) {
+    return cachedToken;
+  }
+
+  return await loginToSolarOfThings();
 }
 
 export default async function handler(req, res) {
   try {
-    const IOT_TOKEN = process.env.IOT_TOKEN;
-    const DEVICE_ID = process.env.DEVICE_ID;
+    const deviceId = process.env.DEVICE_ID;
 
-    if (!IOT_TOKEN || !DEVICE_ID) {
+    if (!deviceId) {
       return res.status(500).json({
         ok: false,
-        error: "Missing IOT_TOKEN or DEVICE_ID in Vercel environment variables."
+        error: "Missing DEVICE_ID in environment variables."
       });
     }
 
-    const url = new URL(SOLAR_URL);
-    url.searchParams.set("deviceId", DEVICE_ID);
-    url.searchParams.set("dataSource", "1");
+    const token = await getValidToken();
 
-    const response = await fetch(url.toString(), {
+    const url =
+      `https://solar.siseli.com/apis/deviceState/simple/state/latest/v1` +
+      `?deviceId=${deviceId}&dataSource=1`;
+
+    const response = await fetch(url, {
       method: "GET",
       headers: {
-        "Accept": "application/json",
+        Accept: "application/json",
         "Accept-Language": "en-US",
         "IOT-Time-Zone": "Asia/Singapore",
-        "IOT-Token": IOT_TOKEN,
-        "Referer": "https://solar.siseli.com/",
+        "IOT-Token": token,
+        Referer: "https://solar.siseli.com/",
         "User-Agent": "Mozilla/5.0"
       }
     });
 
     const json = await response.json();
 
-    if (!response.ok) {
-      return res.status(response.status).json({
+    if (!response.ok || json.code !== 0) {
+      cachedToken = null;
+      cachedTokenExpiry = 0;
+
+      return res.status(500).json({
         ok: false,
-        error: "Solar API request failed.",
+        error: json.message || "Failed to fetch solar data.",
         details: json
       });
     }
 
-    const flat = extractFlatValues(json);
+    const fields = json?.data?.fields || {};
 
     const solar = {
-      timestamp: new Date().toISOString(),
+      raw_time: json?.data?.time,
 
-      pv_power_w: pickNumber(flat, [
-        "pv_power_w",
-        "pv_power",
-        "PV Power",
-        "PV power",
-        "solar_power",
-        "solar power"
-      ]),
+      pv_power_w: Number(getField(fields, "pvInputPower", 0)),
+      pv_voltage_v: Number(getField(fields, "pvInputVoltage", 0)),
 
-      generation_power_kw: pickNumber(flat, [
-        "generation_power_kw",
-        "generation_power",
-        "Generation Power"
-      ]),
+      load_power_kw: Number(getField(fields, "acOutputActivePower", 0)),
+      load_apparent_power_va: Number(getField(fields, "outputApparentPower", 0)),
+      load_percent: Number(getField(fields, "loadPercentage", 0)),
 
-      battery_soc_percent: pickNumber(flat, [
-        "battery_soc_percent",
-        "battery_soc",
-        "SOC",
-        "Battery SOC",
-        "bms_soc_percent",
-        "BMS SOC"
-      ]),
+      battery_soc_percent: Number(
+        getField(fields, "batteryCapacity", getField(fields, "bmsBatterySOC", 0))
+      ),
+      battery_voltage_v: Number(getField(fields, "batteryVoltage", 0)),
+      bms_battery_voltage_v: Number(getField(fields, "bmsBatteryVoltage", 0)),
+      battery_discharge_current_a: Number(
+        getField(fields, "batteryDischargeCurrent", 0)
+      ),
+      battery_charging_current_a: Number(
+        getField(fields, "batteryChargingCurrent", 0)
+      ),
 
-      battery_voltage_v: pickNumber(flat, [
-        "battery_voltage_v",
-        "battery_voltage",
-        "Battery Voltage",
-        "bms_battery_voltage_v"
-      ]),
+      output_voltage_v: Number(getField(fields, "outputVoltage", 0)),
+      output_frequency_hz: Number(getField(fields, "outputFrequency", 0)),
 
-      battery_charging_current_a: pickNumber(flat, [
-        "battery_charging_current_a",
-        "charging_current",
-        "Battery Charging Current"
-      ]),
+      grid_voltage_v: Number(getField(fields, "acInputVoltage", 0)),
+      grid_frequency_hz: Number(getField(fields, "acInputFrequency", 0)),
 
-      battery_discharge_current_a: pickNumber(flat, [
-        "battery_discharge_current_a",
-        "discharge_current",
-        "Battery Discharge Current"
-      ]),
+      working_state: getDisplay(fields, "workingStates"),
+      battery_state: getDisplay(fields, "batState"),
+      grid_state: getDisplay(fields, "gridState"),
+      pv_state: getDisplay(fields, "pvStatuss"),
+      load_state: getDisplay(fields, "loadStatus"),
 
-      load_power_kw: pickNumber(flat, [
-        "load_power_kw",
-        "load_power",
-        "Load Power",
-        "output_active_power",
-        "active_power"
-      ]),
-
-      load_va: pickNumber(flat, [
-        "load_va",
-        "Load VA",
-        "apparent_power"
-      ]),
-
-      load_percent: pickNumber(flat, [
-        "load_percent",
-        "Load Percent",
-        "load_rate"
-      ]),
-
-      output_voltage_v: pickNumber(flat, [
-        "output_voltage_v",
-        "Output Voltage",
-        "ac_output_voltage"
-      ]),
-
-      output_frequency_hz: pickNumber(flat, [
-        "output_frequency_hz",
-        "Output Frequency",
-        "ac_output_frequency"
-      ]),
-
-      grid_voltage_v: pickNumber(flat, [
-        "grid_voltage_v",
-        "Grid Voltage",
-        "input_voltage",
-        "AC Input Voltage"
-      ]),
-
-      grid_frequency_hz: pickNumber(flat, [
-        "grid_frequency_hz",
-        "Grid Frequency",
-        "input_frequency"
-      ]),
-
-      working_state: pickText(flat, [
-        "working_state",
-        "Working State",
-        "inverter_state",
-        "mode"
-      ]),
-
-      battery_state: pickText(flat, [
-        "battery_state",
-        "Battery State",
-        "charge_state"
-      ]),
-
-      bms_cycles: pickNumber(flat, [
-        "bms_cycles",
-        "BMS Cycles",
-        "battery_cycles"
-      ]),
-
-      bms_ambient_temp_c: pickNumber(flat, [
-        "bms_ambient_temp_c",
-        "BMS Ambient Temp",
-        "ambient_temp"
-      ]),
-
-      bms_mos_temp_c: pickNumber(flat, [
-        "bms_mos_temp_c",
-        "BMS MOS Temp",
-        "mos_temp"
-      ])
+      bms_ambient_temp_c: Number(getField(fields, "bmsAmbientTemperature", 0)),
+      bms_mos_temp_c: Number(getField(fields, "bmsMosTemperature", 0)),
+      ntc_max_temp_c: Number(getField(fields, "ntcMaximumTemperature", 0))
     };
 
     return res.status(200).json({
       ok: true,
-      solar,
-      rawFlat: flat
+      solar
     });
   } catch (error) {
     return res.status(500).json({
       ok: false,
-      error: error.message || "Unknown server error."
+      error: error.message
     });
   }
 }
