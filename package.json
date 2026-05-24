@@ -1,7 +1,6 @@
 {
   "scripts": {
     "dev": "vite",
-    "vercel-dev": "vercel dev",
     "build": "vite build",
     "preview": "vite preview"
   },
