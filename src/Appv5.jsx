@@ -24,7 +24,8 @@ import {
 const STORAGE_KEYS = {
   theme: "rwb1ThemeMode",
   setupInfo: "rwb1SetupInfoV1",
-  savingsRecords: "rwb1SavingsMeterRecordsV1"
+  savingsRecords: "rwb1SavingsRecordsV2",
+  savingsSamples: "rwb1SavingsSamplesV2"
 };
 
 const DEFAULT_SETUP = {
@@ -40,9 +41,9 @@ const DEFAULT_SETUP = {
   // 4 × 620W = 2.48kWp
   solarArrayKw: 2.48,
 
-  // Adjusted closer to your inverter actual harvest.
-  // Example: inverter actual 8.46kWh while previous web estimate was ~14kWh.
-  // 8.46 / 14 = ~60%. Default set to 55% for conservative estimate.
+  // Adjusted closer to your inverter actual harvest:
+  // Example: inverter actual 8.46kWh while web estimate was ~14kWh.
+  // 8.46 / 14 = ~60%. Default set to 55% for a more conservative estimate.
   defaultSolarHarvestEfficiency: 0.55,
 
   defaultBatteryCapacityKwh: 9.6,
@@ -93,7 +94,6 @@ function formatNumber(value, digits = 1) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) {
     return "--";
   }
-
   return Number(value).toFixed(digits);
 }
 
@@ -101,7 +101,6 @@ function formatPeso(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) {
     return "--";
   }
-
   return `₱${Number(value).toFixed(2)}`;
 }
 
@@ -109,7 +108,6 @@ function formatPowerKw(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) {
     return "--";
   }
-
   return `${formatNumber(value, 3)} kW`;
 }
 
@@ -117,7 +115,6 @@ function formatPowerW(value) {
   if (value === null || value === undefined || Number.isNaN(Number(value))) {
     return "--";
   }
-
   return `${formatNumber(value, 0)} W`;
 }
 
@@ -495,19 +492,26 @@ function MoreInverterInfo({ solar }) {
   );
 }
 
-function SavingsLineChart({ records }) {
-  const chartRecords = records.slice(-30);
+function SavingsLineChart({ records, liveDailyKwh = 0, liveDailySavings = 0 }) {
+  const chartRecords =
+    records.length > 0
+      ? records.slice(-30)
+      : [
+          {
+            dateKey: "Live",
+            dailyKwh: liveDailyKwh,
+            savingsPhp: liveDailySavings
+          },
+          {
+            dateKey: "Projected",
+            dailyKwh: liveDailyKwh,
+            savingsPhp: liveDailySavings
+          }
+        ];
+
   const width = 680;
   const height = 260;
   const pad = 34;
-
-  if (chartRecords.length === 0) {
-    return (
-      <div className="empty-chart">
-        No manual kWh records yet. Add your daily meter reading to start the graph.
-      </div>
-    );
-  }
 
   const maxKwh = Math.max(
     ...chartRecords.map((item) => Number(item.dailyKwh || 0)),
@@ -605,7 +609,7 @@ function SavingsLineChart({ records }) {
   );
 }
 
-function ElectricitySavingsPage() {
+function ElectricitySavingsPage({ solar }) {
   const [electricityRate, setElectricityRate] = useState(
     DEFAULT_SETUP.defaultElectricityRatePhp
   );
@@ -614,132 +618,140 @@ function ElectricitySavingsPage() {
     readJsonStorage(STORAGE_KEYS.savingsRecords, [])
   );
 
+  const [samples, setSamples] = useState(() =>
+    readJsonStorage(STORAGE_KEYS.savingsSamples, {})
+  );
+
   const [manualDate, setManualDate] = useState(() => getPhilippinesDateParts().dateKey);
-  const [meterReadingKwh, setMeterReadingKwh] = useState("");
+  const [manualKwh, setManualKwh] = useState("");
 
-  function getMonthKey(dateKey) {
-    return String(dateKey || "").slice(0, 7);
-  }
+  useEffect(() => {
+    const loadKw = Number(solar?.load_power_kw);
+    if (!Number.isFinite(loadKw) || loadKw < 0) return;
 
-  function rebuildMeterRecords(inputRecords, rateValue) {
-    const sorted = [...inputRecords]
-      .filter(
-        (item) =>
-          item.dateKey && Number.isFinite(Number(item.meterReadingKwh))
-      )
-      .sort((a, b) => a.dateKey.localeCompare(b.dateKey));
+    const { dateKey, hour } = getPhilippinesDateParts();
+    const currentSamples = readJsonStorage(STORAGE_KEYS.savingsSamples, {});
+    const todaySamples = Array.isArray(currentSamples[dateKey])
+      ? currentSamples[dateKey]
+      : [];
 
-    return sorted.map((item, index) => {
-      const currentReading = Number(item.meterReadingKwh);
-      const previous = sorted[index - 1];
+    const lastSample = todaySamples[todaySamples.length - 1];
+    const now = Date.now();
 
-      const sameMonthAsPrevious =
-        previous && getMonthKey(previous.dateKey) === getMonthKey(item.dateKey);
+    // Save one sample every 5 minutes while dashboard is open.
+    if (!lastSample || now - lastSample.timestamp > 5 * 60 * 1000) {
+      todaySamples.push({ timestamp: now, loadKw });
+      currentSamples[dateKey] = todaySamples.slice(-288);
+      writeJsonStorage(STORAGE_KEYS.savingsSamples, currentSamples);
+      setSamples(currentSamples);
+    }
 
-      // First reading of each month becomes the monthly baseline.
-      const previousReading = sameMonthAsPrevious
-        ? Number(previous.meterReadingKwh)
-        : currentReading;
+    // Auto record after 8:00 AM PH time, once per day, if no manual record exists.
+    if (hour >= 8) {
+      const existingRecords = readJsonStorage(STORAGE_KEYS.savingsRecords, []);
+      const alreadyRecorded = existingRecords.some((item) => item.dateKey === dateKey);
+      const daySamples = currentSamples[dateKey] || [];
 
-      const dailyKwh = Math.max(currentReading - previousReading, 0);
-      const averageLoadKw = dailyKwh / 24;
-      const electricityRatePhp = Number(
-        rateValue || DEFAULT_SETUP.defaultElectricityRatePhp
-      );
-      const savingsPhp = dailyKwh * electricityRatePhp;
+      if (!alreadyRecorded && daySamples.length > 0) {
+        const averageLoadKw =
+          daySamples.reduce((sum, item) => sum + Number(item.loadKw || 0), 0) /
+          daySamples.length;
 
-      return {
-        ...item,
-        source: "Manual Meter",
-        previousReadingKwh: previousReading,
-        dailyKwh,
-        averageLoadKw,
-        electricityRatePhp,
-        savingsPhp
-      };
-    });
-  }
+        const dailyKwh = averageLoadKw * 24;
+        const savingsPhp =
+          dailyKwh * Number(electricityRate || DEFAULT_SETUP.defaultElectricityRatePhp);
 
-  function saveRecords(nextRecords) {
-    writeJsonStorage(STORAGE_KEYS.savingsRecords, nextRecords);
-    setRecords(nextRecords);
-  }
+        const nextRecords = [
+          ...existingRecords,
+          {
+            dateKey,
+            source: "Auto",
+            recordedAt: new Date().toISOString(),
+            sampleCount: daySamples.length,
+            averageLoadKw,
+            dailyKwh,
+            electricityRatePhp: Number(
+              electricityRate || DEFAULT_SETUP.defaultElectricityRatePhp
+            ),
+            savingsPhp
+          }
+        ].slice(-90);
 
-  function addManualMeterReading() {
-    const reading = Number(meterReadingKwh);
+        writeJsonStorage(STORAGE_KEYS.savingsRecords, nextRecords);
+        setRecords(nextRecords);
+      } else {
+        setRecords(existingRecords);
+      }
+    }
+  }, [solar, electricityRate]);
+
+  function addManualRecord() {
+    const kwh = Number(manualKwh);
     const rate = Number(electricityRate);
 
-    if (!manualDate || !Number.isFinite(reading) || reading < 0) {
-      alert("Please enter a valid date and kWh meter reading.");
+    if (!manualDate || !Number.isFinite(kwh) || kwh < 0) {
+      alert("Please enter a valid date and recorded kWh.");
       return;
     }
 
-    const baseRecords = records.filter((item) => item.dateKey !== manualDate);
+    const averageLoadKw = kwh / 24;
+    const savingsPhp = kwh * rate;
 
-    const updatedRecords = [
-      ...baseRecords,
+    const existingRecords = readJsonStorage(STORAGE_KEYS.savingsRecords, []);
+    const withoutSameDate = existingRecords.filter(
+      (item) => item.dateKey !== manualDate
+    );
+
+    const nextRecords = [
+      ...withoutSameDate,
       {
         dateKey: manualDate,
-        meterReadingKwh: reading,
-        recordedAt: new Date().toISOString()
+        source: "Manual",
+        recordedAt: new Date().toISOString(),
+        sampleCount: 1,
+        averageLoadKw,
+        dailyKwh: kwh,
+        electricityRatePhp: rate,
+        savingsPhp
       }
-    ];
+    ]
+      .sort((a, b) => a.dateKey.localeCompare(b.dateKey))
+      .slice(-90);
 
-    const rebuilt = rebuildMeterRecords(updatedRecords, rate).slice(-120);
-
-    saveRecords(rebuilt);
-    setMeterReadingKwh("");
-  }
-
-  function deleteRecord(dateKey) {
-    const nextRecords = rebuildMeterRecords(
-      records.filter((item) => item.dateKey !== dateKey),
-      Number(electricityRate)
-    ).slice(-120);
-
-    saveRecords(nextRecords);
-  }
-
-  function recalculateWithNewRate(nextRate) {
-    setElectricityRate(nextRate);
-    const rebuilt = rebuildMeterRecords(records, Number(nextRate));
-    saveRecords(rebuilt);
+    writeJsonStorage(STORAGE_KEYS.savingsRecords, nextRecords);
+    setRecords(nextRecords);
+    setManualKwh("");
   }
 
   const savingsSummary = useMemo(() => {
-    const billableRecords = records.filter(
-      (item) => Number(item.dailyKwh || 0) > 0
-    );
-
-    const totalKwh = billableRecords.reduce(
+    const totalKwh = records.reduce(
       (sum, item) => sum + Number(item.dailyKwh || 0),
       0
     );
 
-    const totalSavings = billableRecords.reduce(
+    const totalSavings = records.reduce(
       (sum, item) => sum + Number(item.savingsPhp || 0),
       0
     );
 
-    const averageDailyKwh = billableRecords.length
-      ? totalKwh / billableRecords.length
-      : 0;
-
-    const averageLoadKw = averageDailyKwh / 24;
-    const projection30DayKwh = averageDailyKwh * 30;
-    const projection30DaySavings =
-      projection30DayKwh * Number(electricityRate || 0);
+    const averageDailyKwh = records.length ? totalKwh / records.length : 0;
+    const averageDailySavings = records.length ? totalSavings / records.length : 0;
 
     return {
       totalKwh,
       totalSavings,
       averageDailyKwh,
-      averageLoadKw,
-      projection30DayKwh,
-      projection30DaySavings,
-      billableDays: billableRecords.length
+      averageDailySavings,
+      projection30DayKwh: averageDailyKwh * 30,
+      projection30DaySavings: averageDailySavings * 30
     };
-  }, [records, electricityRate]);
+  }, [records]);
+
+  const todayKey = getPhilippinesDateParts().dateKey;
+  const todaySamples = samples[todayKey] || [];
+  const liveLoadKw = Number(solar?.load_power_kw || 0);
+  const liveDailyKwh = liveLoadKw * 24;
+  const liveDailySavings = liveDailyKwh * Number(electricityRate || 0);
 
   return (
     <section className="panel savings-page">
@@ -747,9 +759,8 @@ function ElectricitySavingsPage() {
         <div>
           <div className="panel-title">Electricity Savings</div>
           <p>
-            Manual meter reading only. Enter the cumulative kWh from your
-            separate meter daily. The first reading of each month is treated as
-            0 kWh daily usage.
+            You can manually enter daily recorded kWh from your separate kWh meter.
+            Average load is calculated as recorded kWh ÷ 24 hours.
           </p>
         </div>
 
@@ -760,17 +771,15 @@ function ElectricitySavingsPage() {
             min="0"
             step="0.1"
             value={electricityRate}
-            onChange={(event) => recalculateWithNewRate(event.target.value)}
+            onChange={(event) => setElectricityRate(event.target.value)}
           />
         </label>
       </div>
 
       <div className="manual-kwh-box">
         <div>
-          <strong>Daily Meter Reading Entry</strong>
-          <p>
-            Example: Day 1 = 111 kWh, Day 2 = 115 kWh, daily usage = 4 kWh.
-          </p>
+          <strong>Manual Daily kWh Entry</strong>
+          <p>Use this if you have a separate hardware kWh meter.</p>
         </div>
 
         <label>
@@ -783,42 +792,42 @@ function ElectricitySavingsPage() {
         </label>
 
         <label>
-          Meter Reading (kWh)
+          Recorded kWh
           <input
             type="number"
             min="0"
             step="0.01"
-            value={meterReadingKwh}
-            onChange={(event) => setMeterReadingKwh(event.target.value)}
-            placeholder="Example: 115"
+            value={manualKwh}
+            onChange={(event) => setManualKwh(event.target.value)}
+            placeholder="Example: 7.20"
           />
         </label>
 
-        <button className="mini-btn" type="button" onClick={addManualMeterReading}>
-          Add / Update Reading
+        <button className="mini-btn" type="button" onClick={addManualRecord}>
+          Add / Update Record
         </button>
       </div>
 
       <div className="savings-summary-grid">
         <StatCard
-          icon={<Activity size={24} />}
-          label="Recorded Total kWh"
-          value={`${formatNumber(savingsSummary.totalKwh, 2)} kWh`}
-          sub={`${savingsSummary.billableDays} billable day(s)`}
+          icon={<Zap size={24} />}
+          label="Live Daily Energy"
+          value={`${formatNumber(liveDailyKwh, 2)} kWh`}
+          sub={`Based on live load: ${formatPowerKw(liveLoadKw)}`}
         />
 
         <StatCard
           icon={<Bolt size={24} />}
-          label="Recorded Savings"
-          value={formatPeso(savingsSummary.totalSavings)}
+          label="Live Daily Savings"
+          value={formatPeso(liveDailySavings)}
           sub={`At ₱${formatNumber(electricityRate, 2)}/kWh`}
         />
 
         <StatCard
-          icon={<Zap size={24} />}
-          label="Average Daily Load"
-          value={formatPowerKw(savingsSummary.averageLoadKw)}
-          sub={`${formatNumber(savingsSummary.averageDailyKwh, 2)} kWh/day average`}
+          icon={<Activity size={24} />}
+          label="Recorded Total kWh"
+          value={`${formatNumber(savingsSummary.totalKwh, 2)} kWh`}
+          sub={`${records.length} recorded day(s)`}
         />
 
         <StatCard
@@ -830,7 +839,9 @@ function ElectricitySavingsPage() {
       </div>
 
       <SavingsLineChart
-        records={records.filter((item) => Number(item.dailyKwh || 0) > 0)}
+        records={records}
+        liveDailyKwh={liveDailyKwh}
+        liveDailySavings={liveDailySavings}
       />
 
       <div className="savings-table-wrap">
@@ -838,43 +849,34 @@ function ElectricitySavingsPage() {
           <thead>
             <tr>
               <th>Date</th>
-              <th>Meter Reading</th>
-              <th>Previous Reading</th>
-              <th>Daily kWh</th>
+              <th>Source</th>
               <th>Average Load</th>
+              <th>Total kWh</th>
               <th>Rate</th>
               <th>Savings</th>
-              <th>Action</th>
+              <th>Samples</th>
             </tr>
           </thead>
-
           <tbody>
             {records.length === 0 ? (
               <tr>
-                <td colSpan="8">No manual meter readings yet.</td>
+                <td colSpan="7">
+                  No records yet. Current sample count today: {todaySamples.length}
+                </td>
               </tr>
             ) : (
               records
                 .slice()
                 .reverse()
                 .map((item) => (
-                  <tr key={item.dateKey}>
+                  <tr key={`${item.dateKey}-${item.source}`}>
                     <td>{item.dateKey}</td>
-                    <td>{formatNumber(item.meterReadingKwh, 2)} kWh</td>
-                    <td>{formatNumber(item.previousReadingKwh, 2)} kWh</td>
-                    <td>{formatNumber(item.dailyKwh, 2)} kWh</td>
+                    <td>{item.source || "Auto"}</td>
                     <td>{formatPowerKw(item.averageLoadKw)}</td>
+                    <td>{formatNumber(item.dailyKwh, 2)} kWh</td>
                     <td>₱{formatNumber(item.electricityRatePhp, 2)}</td>
                     <td>{formatPeso(item.savingsPhp)}</td>
-                    <td>
-                      <button
-                        className="table-action-btn"
-                        type="button"
-                        onClick={() => deleteRecord(item.dateKey)}
-                      >
-                        Delete
-                      </button>
-                    </td>
+                    <td>{item.sampleCount}</td>
                   </tr>
                 ))
             )}
@@ -1144,12 +1146,7 @@ export default function App() {
       <section className="hero">
         <div>
           <div className="eyebrow">Solar IoT Dashboard</div>
-<h1 className="brand-title">
-  <span className="brand-sun-logo">
-    <Sun size={28} />
-  </span>
-  {setupInfo.name}
-</h1>
+          <h1>{setupInfo.name}</h1>
           <p>
             Live solar logger data, weather forecast, battery runtime estimate,
             charging estimate, animated power flow, and savings tracking.
@@ -1569,7 +1566,7 @@ export default function App() {
         </section>
       )}
 
-      {activePage === "savings" && <ElectricitySavingsPage />}
+      {activePage === "savings" && <ElectricitySavingsPage solar={solar} />}
 
       {activePage === "more" && <MoreInverterInfo solar={solar} />}
 

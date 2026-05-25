@@ -1076,3 +1076,424 @@ body.light-mode .chart-grid-line {
   padding: 8px 10px;
   margin-right: 4px;
 }
+.charge-estimate-box {
+  margin-top: 22px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(255,255,255,0.1);
+}
+
+.small-runtime {
+  font-size: clamp(1.8rem, 4vw, 3.2rem);
+}
+
+.runtime-controls.single-row {
+  grid-template-columns: 1fr auto;
+}
+
+.manual-kwh-box {
+  display: grid;
+  grid-template-columns: 1.5fr 1fr 1fr auto;
+  gap: 14px;
+  align-items: end;
+  padding: 16px;
+  border-radius: 20px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  margin-bottom: 16px;
+}
+
+.manual-kwh-box label,
+.rate-control {
+  color: #9fb1c7;
+  font-size: 0.84rem;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.manual-kwh-box input,
+.rate-control input,
+.setup-input {
+  width: 100%;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(255,255,255,0.08);
+  color: #ffffff;
+  border-radius: 12px;
+  padding: 10px 12px;
+  outline: none;
+}
+
+.setup-input {
+  margin-top: 6px;
+}
+
+body.light-mode .manual-kwh-box {
+  background: rgba(15, 23, 42, 0.04);
+  border-color: rgba(15, 23, 42, 0.12);
+}
+
+body.light-mode .manual-kwh-box input,
+body.light-mode .setup-input {
+  background: rgba(255,255,255,0.86);
+  border-color: rgba(15, 23, 42, 0.14);
+  color: #0f172a;
+}
+
+@media (max-width: 920px) {
+  .manual-kwh-box,
+  .runtime-controls.single-row {
+    grid-template-columns: 1fr;
+  }
+}
+.deye-flow-card {
+  width: 100%;
+}
+
+.deye-flow-map {
+  position: relative;
+  min-height: 560px;
+  border-radius: 28px;
+  background:
+    linear-gradient(rgba(255,255,255,0.035), rgba(255,255,255,0.035)),
+    radial-gradient(circle at center, rgba(103, 232, 249, 0.09), transparent 34%);
+  overflow: hidden;
+}
+
+.deye-flow-map::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(135deg, transparent 35%, rgba(255,255,255,0.04) 35%, transparent 55%),
+    linear-gradient(45deg, transparent 45%, rgba(255,255,255,0.035) 45%, transparent 70%);
+  opacity: 0.42;
+  pointer-events: none;
+}
+
+.deye-node {
+  position: absolute;
+  z-index: 4;
+  width: 150px;
+  display: grid;
+  justify-items: center;
+  text-align: center;
+  gap: 6px;
+}
+
+.deye-node strong {
+  color: #ffffff;
+  font-size: 1.55rem;
+  line-height: 1;
+}
+
+.deye-node span {
+  color: #9fb1c7;
+  font-size: 0.95rem;
+}
+
+.deye-icon {
+  width: 92px;
+  height: 92px;
+  border-radius: 24px;
+  display: grid;
+  place-items: center;
+  color: #111827;
+  background: rgba(255,255,255,0.94);
+  border: 1px solid rgba(255,255,255,0.5);
+  box-shadow: 0 16px 38px rgba(0,0,0,0.28);
+}
+
+.deye-node.active .deye-icon {
+  animation: nodePulse 1.8s ease-in-out infinite;
+}
+
+.deye-solar {
+  top: 40px;
+  left: 34px;
+}
+
+.deye-grid {
+  top: 40px;
+  right: 34px;
+}
+
+.deye-battery {
+  left: 34px;
+  bottom: 42px;
+}
+
+.deye-load {
+  right: 34px;
+  bottom: 42px;
+}
+
+.deye-grid .deye-status {
+  color: #4ade80;
+  font-size: 1.15rem;
+  font-weight: 800;
+}
+
+.deye-soc {
+  color: #60a5fa;
+  font-size: 1.35rem;
+  font-weight: 900;
+}
+
+.deye-inverter {
+  position: absolute;
+  z-index: 5;
+  left: 50%;
+  top: 50%;
+  width: 118px;
+  height: 118px;
+  transform: translate(-50%, -50%);
+  border-radius: 28px;
+  display: grid;
+  place-items: center;
+  text-align: center;
+  color: #2563eb;
+  background: rgba(255,255,255,0.96);
+  border: 4px solid rgba(37, 99, 235, 0.85);
+  box-shadow: 0 0 34px rgba(37, 99, 235, 0.22);
+}
+
+.deye-inverter span {
+  color: #0f172a;
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.deye-inverter small {
+  color: #64748b;
+  font-size: 0.68rem;
+  max-width: 100px;
+}
+
+.deye-lines {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.deye-wire {
+  fill: none;
+  stroke: rgba(226, 232, 240, 0.32);
+  stroke-width: 4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.deye-wire.active {
+  stroke: rgba(15, 23, 42, 0.74);
+  filter: drop-shadow(0 0 5px rgba(103, 232, 249, 0.25));
+}
+
+.deye-arrow {
+  fill: rgba(15, 23, 42, 0.8);
+}
+
+.deye-dot {
+  opacity: 0;
+  fill: #60a5fa;
+  filter: drop-shadow(0 0 10px rgba(96, 165, 250, 0.95));
+}
+
+.deye-dot.active {
+  opacity: 1;
+}
+
+.solar-dot.active {
+  offset-path: path("M175 120 H300 Q330 120 330 150 V250 Q330 280 360 280 H415");
+  animation: deyeMove 2s linear infinite;
+}
+
+.grid-dot.active {
+  offset-path: path("M725 120 H600 Q570 120 570 150 V250 Q570 280 540 280 H485");
+  animation: deyeMove 2s linear infinite;
+}
+
+.battery-dot.active {
+  offset-path: path("M250 450 H330 Q360 450 360 420 V330 Q360 300 390 300 H420");
+  animation: deyeMove 2s linear infinite;
+}
+
+.load-dot.active {
+  offset-path: path("M480 320 H540 Q570 320 570 350 V420 Q570 450 600 450 H725");
+  animation: deyeMove 2s linear infinite;
+}
+
+@keyframes deyeMove {
+  from {
+    offset-distance: 0%;
+  }
+  to {
+    offset-distance: 100%;
+  }
+}
+
+body.light-mode .deye-flow-map {
+  background:
+    linear-gradient(rgba(255,255,255,0.65), rgba(255,255,255,0.65)),
+    radial-gradient(circle at center, rgba(37, 99, 235, 0.08), transparent 34%);
+}
+
+body.light-mode .deye-node strong,
+body.light-mode .deye-arrow {
+  color: #0f172a;
+  fill: #0f172a;
+}
+
+body.light-mode .deye-wire.active {
+  stroke: rgba(15, 23, 42, 0.78);
+}
+
+body.light-mode .deye-node span {
+  color: #64748b;
+}
+
+@media (max-width: 920px) {
+  .deye-flow-map {
+    min-height: 680px;
+  }
+
+  .deye-node {
+    width: 130px;
+  }
+
+  .deye-icon {
+    width: 74px;
+    height: 74px;
+    border-radius: 20px;
+  }
+
+  .deye-node strong {
+    font-size: 1.15rem;
+  }
+
+  .deye-solar {
+    top: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+  }
+
+  .deye-grid {
+    top: 160px;
+    right: 50%;
+    transform: translateX(50%);
+  }
+
+  .deye-inverter {
+    top: 50%;
+  }
+
+  .deye-battery {
+    left: 50%;
+    bottom: 150px;
+    transform: translateX(-50%);
+  }
+
+  .deye-load {
+    right: 50%;
+    bottom: 20px;
+    transform: translateX(50%);
+  }
+
+  .deye-lines {
+    opacity: 0.25;
+  }
+}
+.table-action-btn {
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  background: rgba(239, 68, 68, 0.12);
+  color: #fecaca;
+  border-radius: 10px;
+  padding: 8px 10px;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.table-action-btn:hover {
+  background: rgba(239, 68, 68, 0.22);
+}
+
+body.light-mode .table-action-btn {
+  color: #991b1b;
+  background: rgba(239, 68, 68, 0.10);
+}
+.line-harvest {
+  stroke: #f59e0b;
+}
+
+.line-load {
+  stroke: #a855f7;
+}
+
+.dot-harvest {
+  fill: #f59e0b;
+}
+
+.dot-load {
+  fill: #a855f7;
+}
+
+.legend-harvest {
+  background: #f59e0b;
+}
+
+.legend-load {
+  background: #a855f7;
+}
+.brand-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand-sun-logo {
+  width: 44px;
+  height: 44px;
+  border-radius: 999px;
+  display: inline-grid;
+  place-items: center;
+  color: #facc15;
+  background:
+    radial-gradient(circle, rgba(250, 204, 21, 0.28), rgba(249, 115, 22, 0.12)),
+    rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(250, 204, 21, 0.35);
+  box-shadow: 0 0 24px rgba(250, 204, 21, 0.22);
+  animation: sunLogoPulse 2.4s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+@keyframes sunLogoPulse {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 0 20px rgba(250, 204, 21, 0.18);
+  }
+
+  50% {
+    transform: scale(1.06);
+    box-shadow: 0 0 30px rgba(250, 204, 21, 0.34);
+  }
+}
+
+body.light-mode .brand-sun-logo {
+  background:
+    radial-gradient(circle, rgba(250, 204, 21, 0.34), rgba(249, 115, 22, 0.14)),
+    rgba(255, 255, 255, 0.86);
+  border-color: rgba(245, 158, 11, 0.38);
+}
+
+@media (max-width: 540px) {
+  .brand-title {
+    gap: 9px;
+  }
+
+  .brand-sun-logo {
+    width: 38px;
+    height: 38px;
+  }
+}
