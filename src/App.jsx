@@ -1155,7 +1155,7 @@ export default function App() {
             charging estimate, animated power flow, and savings tracking.
           </p>
           <div className="maker-credit">
-            Made by Engr. Christian Louie Ethance Ochea, ECT
+            Made by Engr. Christian Louie Ethance Ochea, ECE, ECT
           </div>
         </div>
 
@@ -1762,7 +1762,7 @@ export default function App() {
       )}
 
       <footer>
-        <div>Made by Engr. Christian Louie Ethance Ochea, ECT</div>
+        <div>Made by Engr. Christian Louie Ethance Ochea, ECE, ECT</div>
         <div>
           Last refresh:{" "}
           {lastRefresh
