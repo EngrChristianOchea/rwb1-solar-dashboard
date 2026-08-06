@@ -933,16 +933,6 @@ export default function App() {
   const [useLiveChargeSoc, setUseLiveChargeSoc] = useState(true);
   const [manualChargeSoc, setManualChargeSoc] = useState("");
 
-   const [targetSoc, setTargetSoc] = useState(90);
-
-   const [restoreDefaults, setRestoreDefaults] = useState(true);
-
-   const [controlBusy, setControlBusy] = useState(false);
-
-   const DEFAULT_GRID_SOC = 22;
-
-   const DEFAULT_BATTERY_SOC = 35;
-
   useEffect(() => {
     document.body.classList.toggle("light-mode", theme === "light");
     localStorage.setItem(STORAGE_KEYS.theme, theme);
@@ -1033,95 +1023,6 @@ export default function App() {
       setWeatherError(error.message);
     }
   }
-async function startCharging(target) {
-
-    try{
-
-        setControlBusy(true);
-
-        const response = await fetch("/api/control",{
-
-            method:"POST",
-
-            headers:{
-                "Content-Type":"application/json"
-            },
-
-            body:JSON.stringify({
-
-                action:"charge",
-
-                targetSoc:target,
-
-                restoreDefaults
-
-            })
-
-        });
-
-        const data=await response.json();
-
-        if(!response.ok){
-
-            throw new Error(data.error);
-
-        }
-
-        alert(`Charging until ${target}%`);
-
-    }
-
-    catch(err){
-
-        alert(err.message);
-
-    }
-
-    finally{
-
-        setControlBusy(false);
-
-    }
-
-}
-
-async function restoreDefaultSoc(){
-
-    try{
-
-        setControlBusy(true);
-
-        await fetch("/api/control",{
-
-            method:"POST",
-
-            headers:{
-                "Content-Type":"application/json"
-            },
-
-            body:JSON.stringify({
-
-                action:"restore",
-
-                utilitySoc:22,
-
-                batterySoc:35
-
-            })
-
-        });
-
-        alert("Defaults restored.");
-
-    }
-
-    finally{
-
-        setControlBusy(false);
-
-    }
-
-}
 
   useEffect(() => {
     fetchSolar();
@@ -1310,14 +1211,6 @@ async function restoreDefaultSoc(){
         >
           More Inverter Info
         </TabButton>
-
-<TabButton
-    active={activePage === "control"}
-    icon={<Zap size={18} />}
-    onClick={() => setActivePage("control")}
->
-    Inverter Control
-</TabButton>
 
         <TabButton
           active={activePage === "setup"}
@@ -1675,139 +1568,7 @@ async function restoreDefaultSoc(){
           </div>
         </section>
       )}
-{activePage === "control" && (
-    <section className="panel">
 
-        <div className="panel-header">
-
-            <div>
-
-                <div className="panel-title">
-                    Inverter Control
-                </div>
-
-                <p>
-                    Manual battery charging controls.
-                </p>
-
-            </div>
-
-        </div>
-
-        <div className="control-grid">
-
-    <StatCard
-
-        icon={<Battery size={24}/>}
-
-        label="Battery SOC"
-
-        value={`${formatNumber(solar?.battery_soc_percent,0)}%`}
-
-    />
-
-    <StatCard
-
-        icon={<Activity size={24}/>}
-
-        label="Status"
-
-        value={solar?.battery_state || "--"}
-
-    />
-
-</div>
-
-<div className="control-box">
-
-    <h3>Manual Charge</h3>
-
-    <label>
-
-        Target SOC
-
-        <input
-
-            type="number"
-
-            min="1"
-
-            max="100"
-
-            value={targetSoc}
-
-            onChange={(e)=>setTargetSoc(Number(e.target.value))}
-
-        />
-
-    </label>
-
-    <label className="checkbox">
-
-        <input
-
-            type="checkbox"
-
-            checked={restoreDefaults}
-
-            onChange={(e)=>setRestoreDefaults(e.target.checked)}
-
-        />
-
-        Restore defaults afterwards
-
-    </label>
-
-    <button
-
-        className="primary-btn"
-
-        onClick={()=>startCharging(targetSoc)}
-
-        disabled={controlBusy}
-
-    >
-
-        Start Charging
-
-    </button>
-
-</div>
-
-<div className="quick-actions">
-
-    <button onClick={()=>startCharging(80)}>
-        Charge to 80%
-    </button>
-
-    <button onClick={()=>startCharging(90)}>
-        Charge to 90%
-    </button>
-
-    <button onClick={()=>startCharging(100)}>
-        Charge to 100%
-    </button>
-
-</div>
-
-<div className="restore-box">
-
-    <h3>Restore</h3>
-
-    <p>Default Utility SOC : 22%</p>
-
-    <p>Default Battery SOC : 35%</p>
-
-    <button onClick={restoreDefaultSoc}>
-
-        Restore Defaults
-
-    </button>
-
-</div>
-
-    </section>
-)}
       {activePage === "savings" && <ElectricitySavingsPage />}
 
       {activePage === "more" && <MoreInverterInfo solar={solar} />}
