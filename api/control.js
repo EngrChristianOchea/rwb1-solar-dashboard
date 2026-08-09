@@ -1,70 +1,24 @@
-// api/control.js
+const DEVICE_ID = process.env.SISELI_DEVICE_ID;
+const IOT_TOKEN = process.env.SISELI_IOT_TOKEN;
 
-const BASE_URL = "https://solar.siseli.com/apis";
+const SISELI_BASE_URL = "https://solar.siseli.com";
 
-const DEVICE_ID = process.env.DEVICE_ID;
-const TOKEN = process.env.SISELI_TOKEN;
+const DEFAULT_GRID_SOC = 22;
+const DEFAULT_BATTERY_SOC = 35;
 
-const defaultHeaders = {
-  Accept: "application/json",
-  "Content-Type": "application/json; charset=utf-8",
-  "IOT-Time-Zone": "Asia/Singapore",
-  "IOT-Token": TOKEN,
-  Origin: "https://solar.siseli.com",
-  Referer: "https://solar.siseli.com/"
-};
-
-async function api(url, options = {}) {
-  const response = await fetch(url, {
-    ...options,
-    headers: {
-      ...defaultHeaders,
-      ...(options.headers || {})
-    }
-  });
-
-  const text = await response.text();
-
-  let data;
-
-  try {
-    data = JSON.parse(text);
-  } catch {
-    throw new Error(
-      `Siseli API returned non-JSON response (${response.status}): ${text.slice(
-        0,
-        300
-      )}`
-    );
-  }
-
-  if (!response.ok) {
-    throw new Error(
-      data?.message ||
-        data?.error ||
-        `Siseli API HTTP ${response.status}`
-    );
-  }
-
-  return data;
-}
-
-/**
- * Write inverter configuration
- */
-export async function writeConfig(key, value) {
-  if (!DEVICE_ID) {
-    throw new Error("Missing DEVICE_ID environment variable.");
-  }
-
-  if (!TOKEN) {
-    throw new Error("Missing SISELI_TOKEN environment variable.");
-  }
-
-  return api(
-    `${BASE_URL}/remote/device/config/write?deviceId=${DEVICE_ID}`,
+async function writeConfig(key, value) {
+  const response = await fetch(
+    `${SISELI_BASE_URL}/apis/remote/device/config/write?deviceId=${DEVICE_ID}`,
     {
       method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json; charset=utf-8",
+        "IOT-Time-Zone": "Asia/Singapore",
+        "IOT-Token": IOT_TOKEN,
+        Origin: "https://solar.siseli.com",
+        Referer: "https://solar.siseli.com/"
+      },
       body: JSON.stringify({
         id: DEVICE_ID,
         key,
@@ -72,181 +26,198 @@ export async function writeConfig(key, value) {
       })
     }
   );
-}
 
-/**
- * Read latest inverter state
- */
-export async function getLatestState() {
-  if (!DEVICE_ID) {
-    throw new Error("Missing DEVICE_ID environment variable.");
+  const text = await response.text();
+
+  let data = null;
+
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = text;
   }
 
-  return api(
-    `${BASE_URL}/deviceState/simple/state/latest/v1?deviceId=${DEVICE_ID}&dataSource=1`,
-    {
-      method: "GET"
-    }
-  );
-}
+  console.log("SiSeli write:", {
+    key,
+    value,
+    status: response.status,
+    response: data
+  });
 
-/**
- * Set maximum charging current
- */
-export async function setMaxChargingCurrent(current) {
-  return writeConfig(
-    "setMaxChargingCurrent",
-    current
-  );
-}
-
-/**
- * Set Comeback Utility Mode SOC point
- *
- * This is the SOC threshold used to force/allow
- * utility/grid operation under SBU behavior.
- */
-export async function setComebackUtilityMode(soc) {
-  return writeConfig(
-    "comebackUtilityModeSocPointUnderSBU",
-    soc
-  );
-}
-
-/**
- * Start manual grid charging
- *
- * currentSoc:
- *   Current battery SOC
- *
- * targetSoc:
- *   Desired SOC to finish charging
- *
- * chargingCurrent:
- *   Maximum charging current
- */
-export async function startGridCharging({
-  currentSoc,
-  targetSoc,
-  chargingCurrent = 60
-}) {
-  if (
-    currentSoc === undefined ||
-    targetSoc === undefined
-  ) {
+  if (!response.ok) {
     throw new Error(
-      "currentSoc and targetSoc are required."
+      `SiSeli rejected ${key}=${value} (${response.status})`
     );
   }
 
-  currentSoc = Number(currentSoc);
-  targetSoc = Number(targetSoc);
-  chargingCurrent = Number(chargingCurrent);
-
-  if (
-    !Number.isFinite(currentSoc) ||
-    !Number.isFinite(targetSoc) ||
-    !Number.isFinite(chargingCurrent)
-  ) {
-    throw new Error("Invalid charging parameters.");
-  }
-
-  if (targetSoc <= currentSoc) {
-    throw new Error(
-      `Target SOC (${targetSoc}%) must be higher than current SOC (${currentSoc}%).`
-    );
-  }
-
-  /*
-   * IMPORTANT:
-   *
-   * We deliberately set the comeback utility threshold
-   * to the current SOC or slightly below it.
-   *
-   * Example:
-   *
-   * Battery = 42%
-   * Target  = 90%
-   *
-   * Utility threshold = 42%
-   * Battery mode SOC   = 90%
-   *
-   * This causes the inverter to use utility/grid and
-   * continue until the target threshold is reached.
-   */
-
-  const utilityThreshold = Math.max(
-    0,
-    Math.floor(currentSoc)
-  );
-
-  const results = {};
-
-  // 1. Force utility/grid operation at current SOC
-  results.utilityMode = await setComebackUtilityMode(
-    utilityThreshold
-  );
-
-  // 2. Set desired charging finish SOC
-  results.targetSoc = await writeConfig(
-    "comebackBatteryModeSocPointUnderSBU",
-    targetSoc
-  );
-
-  // 3. Set charging current
-  results.chargingCurrent = await setMaxChargingCurrent(
-    chargingCurrent
-  );
-
-  return {
-    ok: true,
-    currentSoc,
-    targetSoc,
-    chargingCurrent,
-    utilityThreshold,
-    results
-  };
+  return data;
 }
 
-/**
- * Stop / restore grid charging
- *
- * Set these values back to your normal operating values.
- */
-export async function stopGridCharging({
-  utilitySoc = 35,
-  targetSoc = 90,
-  chargingCurrent = 60
-} = {}) {
-  const results = {};
+export default async function handler(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({
+      ok: false,
+      error: "Method not allowed"
+    });
+  }
 
-  results.utilityMode = await setComebackUtilityMode(
-    utilitySoc
-  );
-
-  results.targetSoc = await writeConfig(
-    "comebackBatteryModeSocPointUnderSBU",
-    targetSoc
-  );
-
-  results.chargingCurrent = await setMaxChargingCurrent(
-    chargingCurrent
-  );
-
-  return {
-    ok: true,
-    restored: {
+  try {
+    const {
+      action,
+      currentSoc,
       utilitySoc,
-      targetSoc,
-      chargingCurrent
-    },
-    results
-  };
-}
+      batterySoc,
+      restoreDefaults
+    } = req.body || {};
 
-/**
- * Generic configuration writer
- */
-export async function setValue(key, value) {
-  return writeConfig(key, value);
+    if (!DEVICE_ID || !IOT_TOKEN) {
+      throw new Error(
+        "Missing SISELI_DEVICE_ID or SISELI_IOT_TOKEN environment variable."
+      );
+    }
+
+    /*
+     * =========================================================
+     * START MANUAL GRID CHARGING
+     * =========================================================
+     */
+    if (action === "startCharging") {
+      const current = Number(currentSoc);
+      const requestedUtilitySoc = Number(utilitySoc);
+      const target = Number(batterySoc);
+
+      if (!Number.isFinite(current)) {
+        throw new Error("Invalid current SOC.");
+      }
+
+      if (!Number.isFinite(target)) {
+        throw new Error("Invalid target SOC.");
+      }
+
+      if (target <= current) {
+        throw new Error(
+          `Target SOC ${target}% is not above current SOC ${current}%.`
+        );
+      }
+
+      /*
+       * The utility comeback threshold must be at or below
+       * the current battery SOC.
+       *
+       * Example:
+       *
+       * Current SOC = 48%
+       * Utility comeback = 48%
+       * Battery comeback = 90%
+       *
+       * This forces the inverter to remain/use utility until
+       * battery reaches the target point.
+       */
+
+      const forcedUtilitySoc = Math.min(
+        Math.floor(current),
+        Number.isFinite(requestedUtilitySoc)
+          ? Math.floor(requestedUtilitySoc)
+          : DEFAULT_GRID_SOC
+      );
+
+      const forcedBatterySoc = Math.min(
+        Math.max(Math.floor(target), 1),
+        100
+      );
+
+      /*
+       * FIRST:
+       * Set Comeback Utility Mode SOC.
+       */
+      const utilityResult = await writeConfig(
+        "comebackUtilityModeSocPointUnderSBU",
+        forcedUtilitySoc
+      );
+
+      /*
+       * SECOND:
+       * Set Comeback Battery Mode SOC.
+       */
+      const batteryResult = await writeConfig(
+        "comebackBatteryModeSocPoint",
+        forcedBatterySoc
+      );
+
+      /*
+       * IMPORTANT:
+       *
+       * We deliberately do NOT immediately restore the defaults.
+       *
+       * If we restore:
+       *
+       * Utility = 22
+       * Battery = 35
+       *
+       * immediately after writing 90%, the inverter would
+       * never have a chance to perform the requested charging.
+       */
+
+      return res.status(200).json({
+        ok: true,
+        action: "startCharging",
+        currentSoc: current,
+        utilitySoc: forcedUtilitySoc,
+        batterySoc: forcedBatterySoc,
+        utilityResult,
+        batteryResult,
+        restoreDefaultsRequested: Boolean(restoreDefaults),
+        message:
+          `Grid charging configured: utility comeback ${forcedUtilitySoc}% ` +
+          `and battery comeback ${forcedBatterySoc}%.`
+      });
+    }
+
+    /*
+     * =========================================================
+     * RESTORE NORMAL SETTINGS
+     * =========================================================
+     */
+    if (action === "restore") {
+      const restoreUtilitySoc = Number.isFinite(Number(utilitySoc))
+        ? Number(utilitySoc)
+        : DEFAULT_GRID_SOC;
+
+      const restoreBatterySoc = Number.isFinite(Number(batterySoc))
+        ? Number(batterySoc)
+        : DEFAULT_BATTERY_SOC;
+
+      const utilityResult = await writeConfig(
+        "comebackUtilityModeSocPointUnderSBU",
+        restoreUtilitySoc
+      );
+
+      const batteryResult = await writeConfig(
+        "comebackBatteryModeSocPoint",
+        restoreBatterySoc
+      );
+
+      return res.status(200).json({
+        ok: true,
+        action: "restore",
+        utilitySoc: restoreUtilitySoc,
+        batterySoc: restoreBatterySoc,
+        utilityResult,
+        batteryResult,
+        message: "Default SOC settings restored."
+      });
+    }
+
+    return res.status(400).json({
+      ok: false,
+      error: `Unknown control action: ${action}`
+    });
+  } catch (error) {
+    console.error("SiSeli control error:", error);
+
+    return res.status(500).json({
+      ok: false,
+      error: error.message || "Unknown control error"
+    });
+  }
 }
