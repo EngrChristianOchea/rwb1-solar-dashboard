@@ -1032,28 +1032,27 @@ export default function App() {
       setWeatherError(error.message);
     }
   }
-async function startCharging(target = targetSoc) {
+async function startCharging(target) {
   try {
     setControlBusy(true);
 
     const currentSoc = Number(solar?.battery_soc_percent);
-    const target = Number(target);
 
     if (!Number.isFinite(currentSoc)) {
-      throw new Error("Current battery SOC is not available.");
+      throw new Error("Unable to read current battery SOC.");
     }
 
-    if (!Number.isFinite(target)) {
+    const targetSocValue = Number(target);
+
+    if (!Number.isFinite(targetSocValue)) {
       throw new Error("Invalid target SOC.");
     }
 
-    if (target <= currentSoc) {
+    if (targetSocValue <= currentSoc) {
       throw new Error(
-        `Target SOC (${target}%) must be higher than current SOC (${currentSoc}%).`
+        `Target SOC (${targetSocValue}%) must be higher than current SOC (${currentSoc}%).`
       );
     }
-
-    const utilitySoc = Math.floor(currentSoc);
 
     const response = await fetch("/api/control", {
       method: "POST",
@@ -1063,46 +1062,35 @@ async function startCharging(target = targetSoc) {
       body: JSON.stringify({
         action: "startCharging",
         currentSoc,
-        utilitySoc,
-        batterySoc: target
+        utilitySoc: Math.floor(currentSoc),
+        batterySoc: targetSocValue,
+        restoreDefaults
       })
     });
 
     const data = await response.json();
 
     if (!response.ok || !data.ok) {
-      throw new Error(
-        data.error || "Failed to start charging"
-      );
+      throw new Error(data.error || "Failed to start charging.");
     }
-
-    setTargetSoc(target);
-    setManualCharging(true);
 
     alert(
       `Manual grid charging started.\n\n` +
       `Current SOC: ${currentSoc}%\n` +
-      `Utility comeback: ${data.utilitySoc}%\n` +
+      `Utility Comeback: ${data.utilitySoc}%\n` +
       `Target SOC: ${data.batterySoc}%`
     );
 
-    await fetchSolar();
-
-    return data;
-
+    // Keep polling solar data so the UI sees SOC changes.
+    fetchSolar();
   } catch (error) {
     console.error("Start charging error:", error);
-
-    alert(
-      `Failed to start charging:\n\n${error.message}`
-    );
-
-    throw error;
-
+    alert(error.message || "Failed to start charging.");
   } finally {
     setControlBusy(false);
   }
 }
+
 async function completeManualCharging() {
   if (!manualCharging || controlBusy) {
     return;
@@ -1167,40 +1155,23 @@ async function stopManualCharging() {
       },
       body: JSON.stringify({
         action: "restore",
-        utilitySoc: 22,
-        batterySoc: 35
+        utilitySoc: DEFAULT_GRID_SOC,
+        batterySoc: DEFAULT_BATTERY_SOC
       })
     });
 
     const data = await response.json();
 
     if (!response.ok || !data.ok) {
-      throw new Error(
-        data.error || "Failed to restore default settings."
-      );
+      throw new Error(data.error || "Failed to restore defaults.");
     }
 
-    setManualCharging(false);
+    alert("Manual charging stopped. Default SOC settings restored.");
 
     await fetchSolar();
-
-    alert(
-      "Manual charging stopped.\n\n" +
-      "Default inverter settings restored:\n" +
-      "Utility SOC: 22%\n" +
-      "Battery SOC: 35%"
-    );
-
   } catch (error) {
-    console.error(
-      "Stop charging error:",
-      error
-    );
-
-    alert(
-      `Failed to stop manual charging:\n\n${error.message}`
-    );
-
+    console.error("Stop charging error:", error);
+    alert(error.message || "Failed to stop manual charging.");
   } finally {
     setControlBusy(false);
   }
@@ -1899,48 +1870,23 @@ useEffect(() => {
   </p>
 </div>
     <button
-
-        className="primary-btn"
-
-        onClick={()=>startCharging(targetSoc)}
-
-        disabled={controlBusy}
-
-    >
-
-        Start Charging
-
-    </button>
-
-</div>
-
-<div className="quick-actions">
-
-<button
-  className="mini-btn"
-  type="button"
-  onClick={() => startCharging(80)}
-  disabled={controlBusy}
+  className="primary-btn"
+  onClick={() => startCharging(targetSoc)}
+  disabled={
+    controlBusy ||
+    !Number.isFinite(Number(solar?.battery_soc_percent)) ||
+    Number(targetSoc) <= Number(solar?.battery_soc_percent)
+  }
 >
-  Charge to 80%
+  {controlBusy ? "Starting..." : "Start Charging"}
 </button>
 
 <button
-  className="mini-btn"
-  type="button"
-  onClick={() => startCharging(90)}
+  className="danger-btn"
+  onClick={stopManualCharging}
   disabled={controlBusy}
 >
-  Charge to 90%
-</button>
-
-<button
-  className="mini-btn"
-  type="button"
-  onClick={() => startCharging(100)}
-  disabled={controlBusy}
->
-  Charge to 100%
+  Stop Manual Charging
 </button>
 
 </div>
