@@ -1033,46 +1033,94 @@ export default function App() {
     }
   }
 async function startCharging(target) {
+  if (controlBusy) return;
+
   try {
     setControlBusy(true);
 
-    const currentSoc = Number(solar?.battery_soc_percent);
+    const currentSoc = Number(
+      solar?.battery_soc_percent
+    );
 
     if (!Number.isFinite(currentSoc)) {
-      throw new Error("Unable to read current battery SOC.");
+      throw new Error(
+        "Unable to read current battery SOC."
+      );
     }
 
     const targetSocValue = Number(target);
 
     if (!Number.isFinite(targetSocValue)) {
-      throw new Error("Invalid target SOC.");
+      throw new Error(
+        "Invalid target SOC."
+      );
     }
 
-    if (targetSocValue <= currentSoc) {
+    if (
+      targetSocValue <= currentSoc
+    ) {
       throw new Error(
         `Target SOC (${targetSocValue}%) must be higher than current SOC (${currentSoc}%).`
       );
     }
 
-    const response = await fetch("/api/control", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        action: "startCharging",
-        currentSoc,
-        utilitySoc: Math.floor(currentSoc),
-        batterySoc: targetSocValue,
-        restoreDefaults
-      })
-    });
-
-    const data = await response.json();
-
-    if (!response.ok || !data.ok) {
-      throw new Error(data.error || "Failed to start charging.");
+    if (targetSocValue > 100) {
+      throw new Error(
+        "Target SOC cannot exceed 100%."
+      );
     }
+
+    const response = await fetch(
+      "/api/control",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type":
+            "application/json"
+        },
+        body: JSON.stringify({
+          action: "startCharging",
+
+          currentSoc,
+
+          utilitySoc:
+            Math.floor(currentSoc),
+
+          batterySoc:
+            Math.floor(targetSocValue)
+        })
+      }
+    );
+
+    const data =
+      await response.json();
+
+    if (
+      !response.ok ||
+      !data.ok
+    ) {
+      throw new Error(
+        data.error ||
+          "Failed to start charging."
+      );
+    }
+
+    /*
+     * IMPORTANT:
+     * Mark manual charging as active.
+     *
+     * The SOC monitoring useEffect will now
+     * automatically restore defaults when
+     * target SOC is reached.
+     */
+
+    setTargetSoc(
+      Math.floor(targetSocValue)
+    );
+
+    setManualCharging(true);
+
+    await fetchSolar();
 
     alert(
       `Manual grid charging started.\n\n` +
@@ -1080,44 +1128,147 @@ async function startCharging(target) {
       `Utility Comeback: ${data.utilitySoc}%\n` +
       `Target SOC: ${data.batterySoc}%`
     );
-
-    // Keep polling solar data so the UI sees SOC changes.
-    fetchSolar();
   } catch (error) {
-    console.error("Start charging error:", error);
-    alert(error.message || "Failed to start charging.");
+    console.error(
+      "Start charging error:",
+      error
+    );
+
+    alert(
+      error.message ||
+        "Failed to start charging."
+    );
   } finally {
     setControlBusy(false);
   }
 }
+async function stopManualCharging() {
+  if (controlBusy) return;
 
+  try {
+    setControlBusy(true);
+
+    const response = await fetch(
+      "/api/control",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type":
+            "application/json"
+        },
+        body: JSON.stringify({
+          action: "restore",
+
+          utilitySoc:
+            DEFAULT_GRID_SOC,
+
+          batterySoc:
+            DEFAULT_BATTERY_SOC
+        })
+      }
+    );
+
+    const data =
+      await response.json();
+
+    if (
+      !response.ok ||
+      !data.ok
+    ) {
+      throw new Error(
+        data.error ||
+          "Failed to restore defaults."
+      );
+    }
+
+    /*
+     * Stop monitoring immediately.
+     */
+
+    setManualCharging(false);
+
+    await fetchSolar();
+
+    alert(
+      `Manual charging stopped.\n\n` +
+      `Default inverter settings restored:\n` +
+      `Utility SOC: ${DEFAULT_GRID_SOC}%\n` +
+      `Battery SOC: ${DEFAULT_BATTERY_SOC}%`
+    );
+  } catch (error) {
+    console.error(
+      "Stop charging error:",
+      error
+    );
+
+    alert(
+      error.message ||
+        "Failed to stop manual charging."
+    );
+  } finally {
+    setControlBusy(false);
+  }
+}
 async function completeManualCharging() {
-  if (!manualCharging || controlBusy) {
+  if (
+    !manualCharging ||
+    controlBusy
+  ) {
+    return;
+  }
+
+  const reachedTarget =
+    Number(
+      solar?.battery_soc_percent
+    ) >= Number(targetSoc);
+
+  if (!reachedTarget) {
     return;
   }
 
   try {
     setControlBusy(true);
 
-    const response = await fetch("/api/control", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        action: "restore",
-        utilitySoc: 22,
-        batterySoc: 35
-      })
-    });
+    const response = await fetch(
+      "/api/control",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type":
+            "application/json"
+        },
+        body: JSON.stringify({
+          action: "restore",
 
-    const data = await response.json();
+          utilitySoc:
+            DEFAULT_GRID_SOC,
 
-    if (!response.ok || !data.ok) {
+          batterySoc:
+            DEFAULT_BATTERY_SOC
+        })
+      }
+    );
+
+    const data =
+      await response.json();
+
+    if (
+      !response.ok ||
+      !data.ok
+    ) {
       throw new Error(
-        data.error || "Failed to restore default SOC settings."
+        data.error ||
+          "Failed to restore default SOC settings."
       );
     }
+
+    /*
+     * Turn off manual charging BEFORE
+     * fetching new solar data.
+     *
+     * This prevents the monitoring effect
+     * from attempting another restore.
+     */
 
     setManualCharging(false);
 
@@ -1126,77 +1277,66 @@ async function completeManualCharging() {
     alert(
       `Target SOC reached (${targetSoc}%).\n\n` +
       `Default inverter settings restored:\n` +
-      `Utility SOC: 22%\n` +
-      `Battery SOC: 35%`
+      `Utility SOC: ${DEFAULT_GRID_SOC}%\n` +
+      `Battery SOC: ${DEFAULT_BATTERY_SOC}%`
     );
-
   } catch (error) {
     console.error(
       "Automatic restore error:",
       error
     );
 
+    /*
+     * Keep manualCharging = true here.
+     *
+     * That means the system will retry the
+     * restore on the next SOC update instead
+     * of silently assuming it succeeded.
+     */
+
     alert(
       `Charging reached the target, but the default settings could not be restored:\n\n${error.message}`
     );
-
-  } finally {
-    setControlBusy(false);
-  }
-}
-async function stopManualCharging() {
-  try {
-    setControlBusy(true);
-
-    const response = await fetch("/api/control", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        action: "restore",
-        utilitySoc: DEFAULT_GRID_SOC,
-        batterySoc: DEFAULT_BATTERY_SOC
-      })
-    });
-
-    const data = await response.json();
-
-    if (!response.ok || !data.ok) {
-      throw new Error(data.error || "Failed to restore defaults.");
-    }
-
-    alert("Manual charging stopped. Default SOC settings restored.");
-
-    await fetchSolar();
-  } catch (error) {
-    console.error("Stop charging error:", error);
-    alert(error.message || "Failed to stop manual charging.");
   } finally {
     setControlBusy(false);
   }
 }
 async function restoreDefaultSoc() {
+  if (controlBusy) return;
+
   try {
     setControlBusy(true);
 
-    const response = await fetch("/api/control", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify({
-        action: "restore",
-        utilitySoc: 22,
-        batterySoc: 35
-      })
-    });
+    const response = await fetch(
+      "/api/control",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type":
+            "application/json"
+        },
+        body: JSON.stringify({
+          action: "restore",
 
-    const data = await response.json();
+          utilitySoc:
+            DEFAULT_GRID_SOC,
 
-    if (!response.ok || !data.ok) {
+          batterySoc:
+            DEFAULT_BATTERY_SOC
+        })
+      }
+    );
+
+    const data =
+      await response.json();
+
+    if (
+      !response.ok ||
+      !data.ok
+    ) {
       throw new Error(
-        data.error || "Failed to restore defaults."
+        data.error ||
+          "Failed to restore defaults."
       );
     }
 
@@ -1204,8 +1344,11 @@ async function restoreDefaultSoc() {
 
     await fetchSolar();
 
-    alert("Default SOC settings restored.");
-
+    alert(
+      `Default SOC settings restored.\n\n` +
+      `Utility SOC: ${DEFAULT_GRID_SOC}%\n` +
+      `Battery SOC: ${DEFAULT_BATTERY_SOC}%`
+    );
   } catch (error) {
     console.error(
       "Restore error:",
@@ -1215,23 +1358,29 @@ async function restoreDefaultSoc() {
     alert(
       `Failed to restore defaults:\n\n${error.message}`
     );
-
   } finally {
     setControlBusy(false);
   }
 }
-
   useEffect(() => {
     fetchSolar();
 
     const timer = setInterval(fetchSolar, 30000);
     return () => clearInterval(timer);
   }, []);
-useEffect(() => {
-  if (!manualCharging) return;
 
-  const currentSoc = Number(solar?.battery_soc_percent);
-  const target = Number(targetSoc);
+useEffect(() => {
+  if (!manualCharging) {
+    return;
+  }
+
+  const currentSoc = Number(
+    solar?.battery_soc_percent
+  );
+
+  const target = Number(
+    targetSoc
+  );
 
   if (
     !Number.isFinite(currentSoc) ||
@@ -1794,120 +1943,316 @@ useEffect(() => {
         </section>
       )}
 {activePage === "control" && (
-    <section className="panel">
-
-        <div className="panel-header">
-
-            <div>
-
-                <div className="panel-title">
-                    Inverter Control
-                </div>
-
-                <p>
-                    Manual battery charging controls.
-                </p>
-
-            </div>
-
+  <section className="panel control-panel">
+    <div className="panel-header">
+      <div>
+        <div className="panel-title">
+          Inverter Control
         </div>
 
-        <div className="control-grid">
+        <p>
+          Manually charge the battery from the
+          utility grid until the selected SOC,
+          then automatically restore the normal
+          inverter settings.
+        </p>
+      </div>
+    </div>
 
-    <StatCard
+    <div className="control-grid">
 
-        icon={<Battery size={24}/>}
-
+      <StatCard
+        icon={<Battery size={24} />}
         label="Battery SOC"
+        value={`${formatNumber(
+          solar?.battery_soc_percent,
+          0
+        )}%`}
+        sub={
+          solar?.battery_voltage_v
+            ? `${formatNumber(
+                solar.battery_voltage_v,
+                1
+              )} V`
+            : "Live battery SOC"
+        }
+      />
 
-        value={`${formatNumber(solar?.battery_soc_percent,0)}%`}
+      <StatCard
+        icon={<Activity size={24} />}
+        label="Battery Status"
+        value={
+          solar?.battery_state || "--"
+        }
+        sub={
+          manualCharging
+            ? `Manual charging → ${targetSoc}%`
+            : "Normal inverter operation"
+        }
+      />
 
-    />
+      <StatCard
+        icon={<Bolt size={24} />}
+        label="Grid Voltage"
+        value={`${formatNumber(
+          solar?.grid_voltage_v,
+          0
+        )} V`}
+        sub={
+          solar?.grid_state ||
+          "Utility grid"
+        }
+      />
 
-    <StatCard
+      <StatCard
+        icon={<Zap size={24} />}
+        label="Charging Current"
+        value={`${formatNumber(
+          solar?.battery_charging_current_a,
+          1
+        )} A`}
+        sub={
+          solar?.battery_charging_current_a > 0
+            ? "Battery charging"
+            : "Not charging"
+        }
+      />
 
-        icon={<Activity size={24}/>}
+    </div>
 
-        label="Status"
+    <div className="control-card">
 
-        value={solar?.battery_state || "--"}
+      <div className="panel-title">
+        Manual Grid Charging
+      </div>
 
-    />
+      <p>
+        Set the target battery SOC. The inverter
+        will temporarily use the utility comeback
+        and battery comeback settings for manual
+        charging.
+      </p>
 
-</div>
+      <div className="control-status">
 
-<div className="control-box">
+        <div className="control-status-item">
+          <span>Status</span>
 
-    <h3>Manual Charge</h3>
+          <strong>
+            {manualCharging
+              ? "MANUAL CHARGING ACTIVE"
+              : "NORMAL MODE"}
+          </strong>
+        </div>
 
-    <label>
+        <div className="control-status-item">
+          <span>Current SOC</span>
 
-        Target SOC
+          <strong>
+            {formatNumber(
+              solar?.battery_soc_percent,
+              0
+            )}
+            %
+          </strong>
+        </div>
 
-        <input
+        <div className="control-status-item">
+          <span>Target SOC</span>
 
+          <strong>
+            {targetSoc}%
+          </strong>
+        </div>
+
+      </div>
+
+      <div className="control-form">
+
+        <label>
+          Target SOC (%)
+
+          <input
             type="number"
-
             min="1"
-
             max="100"
-
+            step="1"
             value={targetSoc}
+            disabled={
+              manualCharging ||
+              controlBusy
+            }
+            onChange={(event) => {
+              const value =
+                Number(
+                  event.target.value
+                );
 
-            onChange={(e)=>setTargetSoc(Number(e.target.value))}
+              setTargetSoc(
+                Math.min(
+                  Math.max(
+                    value,
+                    1
+                  ),
+                  100
+                )
+              );
+            }}
+          />
+        </label>
 
-        />
+        <button
+          className="mini-btn"
+          type="button"
+          disabled={
+            manualCharging ||
+            controlBusy ||
+            !Number.isFinite(
+              Number(
+                solar?.battery_soc_percent
+              )
+            ) ||
+            Number(targetSoc) <=
+              Number(
+                solar?.battery_soc_percent
+              )
+          }
+          onClick={() =>
+            startCharging(
+              targetSoc
+            )
+          }
+        >
+          {controlBusy &&
+          !manualCharging
+            ? "Starting..."
+            : "Start Manual Charging"}
+        </button>
 
-    </label>
+      </div>
 
-<div className="control-note">
-  <strong>Charging mode</strong>
-  <p>
-    Start Charging temporarily changes the Comeback Utility Mode
-    and Comeback Battery Mode settings. The inverter will remain in
-    the charging configuration until you manually restore the default
-    settings after charging is complete.
-  </p>
-</div>
-    <button
-  className="primary-btn"
-  onClick={() => startCharging(targetSoc)}
-  disabled={
-    controlBusy ||
-    !Number.isFinite(Number(solar?.battery_soc_percent)) ||
-    Number(targetSoc) <= Number(solar?.battery_soc_percent)
-  }
->
-  {controlBusy ? "Starting..." : "Start Charging"}
-</button>
+      {manualCharging && (
+        <div className="control-active-box">
 
-<button
-  className="danger-btn"
-  onClick={stopManualCharging}
-  disabled={controlBusy}
->
-  Stop Manual Charging
-</button>
+          <div>
+            <strong>
+              Manual charging is active
+            </strong>
 
-</div>
+            <p>
+              Charging will automatically stop
+              when the battery reaches{" "}
+              <strong>
+                {targetSoc}%
+              </strong>
+              .
+            </p>
+          </div>
 
-<div className="restore-box">
+          <div className="control-progress">
 
-    <h3>Restore</h3>
+            <div
+              className="control-progress-fill"
+              style={{
+                width: `${Math.min(
+                  Math.max(
+                    Number(
+                      solar?.battery_soc_percent ||
+                        0
+                    ),
+                    0
+                  ),
+                  100
+                )}%`
+              }}
+            />
 
-    <p>Default Utility SOC : 22%</p>
+          </div>
 
-    <p>Default Battery SOC : 35%</p>
+          <div className="control-progress-labels">
+            <span>
+              Current:{" "}
+              {formatNumber(
+                solar?.battery_soc_percent,
+                0
+              )}
+              %
+            </span>
 
-    <button onClick={restoreDefaultSoc}>
+            <span>
+              Target: {targetSoc}%
+            </span>
+          </div>
 
-        Restore Defaults
+          <button
+            className="danger-btn"
+            type="button"
+            disabled={controlBusy}
+            onClick={
+              stopManualCharging
+            }
+          >
+            {controlBusy
+              ? "Restoring..."
+              : "Return / Stop Manual Charging"}
+          </button>
 
-    </button>
+        </div>
+      )}
 
-</div>
+    </div>
 
-    </section>
+    <div className="control-card">
+
+      <div className="panel-title">
+        Normal Inverter Settings
+      </div>
+
+      <p>
+        These are the settings restored after
+        manual charging is completed or stopped.
+      </p>
+
+      <div className="control-defaults">
+
+        <div className="control-default-item">
+          <span>
+            Utility Comeback SOC
+          </span>
+
+          <strong>
+            {DEFAULT_GRID_SOC}%
+          </strong>
+        </div>
+
+        <div className="control-default-item">
+          <span>
+            Battery Comeback SOC
+          </span>
+
+          <strong>
+            {DEFAULT_BATTERY_SOC}%
+          </strong>
+        </div>
+
+      </div>
+
+      <button
+        className="mini-btn"
+        type="button"
+        disabled={controlBusy}
+        onClick={
+          restoreDefaultSoc
+        }
+      >
+        {controlBusy
+          ? "Restoring..."
+          : "Restore Defaults"}
+      </button>
+
+    </div>
+
+  </section>
 )}
       {activePage === "savings" && <ElectricitySavingsPage />}
 
