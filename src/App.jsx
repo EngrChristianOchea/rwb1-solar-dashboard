@@ -1033,58 +1033,25 @@ export default function App() {
       setWeatherError(error.message);
     }
   }
-async function startCharging(target) {
+async function startCharging() {
+  const response = await fetch("/api/control", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      action: "startCharging"
+    })
+  });
 
-    try{
+  const data = await response.json();
 
-        setControlBusy(true);
+  if (!response.ok || !data.ok) {
+    throw new Error(data.error || "Failed to start charging");
+  }
 
-        const response = await fetch("/api/control",{
-
-            method:"POST",
-
-            headers:{
-                "Content-Type":"application/json"
-            },
-
-            body:JSON.stringify({
-
-                action:"charge",
-
-                targetSoc:target,
-
-                restoreDefaults
-
-            })
-
-        });
-
-        const data=await response.json();
-
-        if(!response.ok){
-
-            throw new Error(data.error);
-
-        }
-
-        alert(`Charging until ${target}%`);
-
-    }
-
-    catch(err){
-
-        alert(err.message);
-
-    }
-
-    finally{
-
-        setControlBusy(false);
-
-    }
-
+  return data;
 }
-
 async function restoreDefaultSoc(){
 
     try{
