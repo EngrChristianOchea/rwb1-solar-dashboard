@@ -8,21 +8,21 @@ const SISELI_BASE_URL = "https://solar.siseli.com";
 const DEFAULT_GRID_SOC = 22;
 const DEFAULT_BATTERY_SOC = 35;
 
-let cachedToken = null;
-let cachedTokenExpiry = 0;
-
-// Same SISELI open API credentials used by solar.js
 const OPEN_APP_ID = "rBrTRfAPXz";
 
 const ENCRYPTED_OPEN_APP_SECRET =
   "I4D0KRr2339z3pQ/at91V9BpFAOe54DaTafwSm6suIQ=";
 
+// ------------------------------------------------------------
+// Dynamic Solar of Things token cache
+// ------------------------------------------------------------
 
-/*
-=========================================================
-SISELI OPEN API SIGNING
-=========================================================
-*/
+let cachedToken = null;
+let cachedTokenExpiry = 0;
+
+// ------------------------------------------------------------
+// Open API signing helpers
+// ------------------------------------------------------------
 
 function randomNonce(length = 32) {
   const chars =
@@ -36,7 +36,6 @@ function randomNonce(length = 32) {
 
   return result;
 }
-
 
 function decryptOpenSecret(appId, encryptedSecret) {
   const md5 = CryptoJS.MD5(appId).toString().toLowerCase();
@@ -56,7 +55,6 @@ function decryptOpenSecret(appId, encryptedSecret) {
   return decrypted.toString(CryptoJS.enc.Utf8).trim();
 }
 
-
 function sortObject(obj) {
   return Object.keys(obj)
     .sort()
@@ -66,13 +64,11 @@ function sortObject(obj) {
     }, {});
 }
 
-
 function stringifyQueryNoEncode(obj) {
   return Object.entries(obj)
     .map(([key, value]) => `${key}=${value}`)
     .join("&");
 }
-
 
 function getBodyHash(method, bodyString) {
   if (method.toUpperCase() === "GET") {
@@ -83,13 +79,10 @@ function getBodyHash(method, bodyString) {
     return "";
   }
 
-  return CryptoJS.SHA256(
-    CryptoJS.enc.Utf8.parse(bodyString)
-  )
+  return CryptoJS.SHA256(CryptoJS.enc.Utf8.parse(bodyString))
     .toString()
     .toLowerCase();
 }
-
 
 function makeOpenHeaders({ url, method, bodyString }) {
   const nonce = randomNonce(32);
@@ -99,7 +92,6 @@ function makeOpenHeaders({ url, method, bodyString }) {
   const parsedUrl = new URL(url);
 
   for (const [key, value] of parsedUrl.searchParams.entries()) {
-
     if (
       key !== "IOT-Open-AppID" &&
       key !== "IOT-Open-Nonce" &&
@@ -108,41 +100,28 @@ function makeOpenHeaders({ url, method, bodyString }) {
     ) {
       signParams[key] = value;
     }
-
   }
 
-  signParams["IOT-Open-Body-Hash"] =
-    getBodyHash(method, bodyString);
-
+  signParams["IOT-Open-Body-Hash"] = getBodyHash(method, bodyString);
   signParams["IOT-Open-AppID"] = OPEN_APP_ID;
   signParams["IOT-Open-Nonce"] = nonce;
 
   const sortedParams = sortObject(signParams);
 
-  const queryString =
-    stringifyQueryNoEncode(sortedParams);
+  const queryString = stringifyQueryNoEncode(sortedParams);
 
-  const queryBase64 =
-    CryptoJS.enc.Base64.stringify(
-      CryptoJS.enc.Utf8.parse(queryString)
-    );
+  const queryBase64 = CryptoJS.enc.Base64.stringify(
+    CryptoJS.enc.Utf8.parse(queryString)
+  );
 
-  const openSecret =
-    decryptOpenSecret(
-      OPEN_APP_ID,
-      ENCRYPTED_OPEN_APP_SECRET
-    );
+  const openSecret = decryptOpenSecret(
+    OPEN_APP_ID,
+    ENCRYPTED_OPEN_APP_SECRET
+  );
 
-  const hmac =
-    CryptoJS.HmacSHA256(
-      queryBase64,
-      openSecret
-    );
+  const hmac = CryptoJS.HmacSHA256(queryBase64, openSecret);
 
-  const sign =
-    CryptoJS.MD5(hmac)
-      .toString()
-      .toLowerCase();
+  const sign = CryptoJS.MD5(hmac).toString().toLowerCase();
 
   return {
     "IOT-Open-AppID": OPEN_APP_ID,
@@ -151,15 +130,12 @@ function makeOpenHeaders({ url, method, bodyString }) {
   };
 }
 
-
-/*
-=========================================================
-LOGIN
-=========================================================
-*/
+// ------------------------------------------------------------
+// Dynamic login
+// Same mechanism used by solar.js
+// ------------------------------------------------------------
 
 async function loginToSolarOfThings() {
-
   const account = process.env.SOT_ACCOUNT;
   const password = process.env.SOT_PASSWORD_HASH;
 
@@ -169,626 +145,440 @@ async function loginToSolarOfThings() {
     );
   }
 
-  const url =
-    `${SISELI_BASE_URL}/apis/login/account`;
+  const url = `${SISELI_BASE_URL}/apis/login/account`;
 
   const bodyString = JSON.stringify({
     account,
     password
   });
 
-  const openHeaders =
-    makeOpenHeaders({
-      url,
-      method: "POST",
-      bodyString
-    });
+  const openHeaders = makeOpenHeaders({
+    url,
+    method: "POST",
+    bodyString
+  });
 
   const response = await fetch(url, {
-
     method: "POST",
-
     headers: {
-
       Accept: "application/json",
-
       "Accept-Language": "en-US",
-
-      "Content-Type":
-        "application/json; charset=utf-8",
+      "Content-Type": "application/json; charset=utf-8",
 
       ...openHeaders,
 
-      "IOT-Time-Zone":
-        "Asia/Singapore",
+      "IOT-Time-Zone": "Asia/Singapore",
+      "IOT-Token": "null",
 
-      "IOT-Token":
-        "null",
-
-      Origin:
-        "https://solar.siseli.com",
-
-      Referer:
-        "https://solar.siseli.com/",
-
-      "User-Agent":
-        "Mozilla/5.0"
-
+      Origin: "https://solar.siseli.com",
+      Referer: "https://solar.siseli.com/",
+      "User-Agent": "Mozilla/5.0"
     },
-
     body: bodyString
-
   });
 
-  const json =
-    await response.json();
+  const text = await response.text();
 
-  if (!response.ok || json.code !== 0) {
+  let json;
 
-    throw new Error(
-      json.message ||
-      "Solar of Things login failed."
-    );
-
+  try {
+    json = text ? JSON.parse(text) : null;
+  } catch {
+    json = null;
   }
 
-  const accessToken =
-    json?.data?.accessToken;
+  if (!response.ok || json?.code !== 0) {
+    throw new Error(
+      json?.message || "Solar of Things login failed."
+    );
+  }
 
-  const expiresAt =
-    json?.data?.accessTokenWillExpiredAt;
+  const accessToken = json?.data?.accessToken;
+  const expiresAt = json?.data?.accessTokenWillExpiredAt;
 
   if (!accessToken) {
-
     throw new Error(
       "Login succeeded, but no accessToken was returned."
     );
-
   }
 
-  cachedToken =
-    accessToken;
+  cachedToken = accessToken;
 
-  cachedTokenExpiry =
-    expiresAt
-      ? new Date(expiresAt).getTime()
-      : Date.now() + 60 * 60 * 1000;
+  cachedTokenExpiry = expiresAt
+    ? new Date(expiresAt).getTime()
+    : Date.now() + 60 * 60 * 1000;
+
+  console.log(
+    "SiSeli dynamic token acquired. Expiry:",
+    new Date(cachedTokenExpiry).toISOString()
+  );
 
   return accessToken;
 }
 
-
-/*
-=========================================================
-GET VALID TOKEN
-=========================================================
-*/
-
 async function getValidToken() {
-
   const now = Date.now();
 
   if (
     cachedToken &&
-    now <
-      cachedTokenExpiry -
-        5 * 60 * 1000
+    now < cachedTokenExpiry - 5 * 60 * 1000
   ) {
-
     return cachedToken;
-
   }
+
+  console.log("SiSeli token missing/expired. Logging in...");
 
   return await loginToSolarOfThings();
 }
 
+// ------------------------------------------------------------
+// Configuration writer
+// ------------------------------------------------------------
 
-/*
-=========================================================
-DEVICE ID
-=========================================================
-*/
-
-function getDeviceId() {
-
-  const deviceId =
-    process.env.DEVICE_ID;
+async function writeConfigWithToken(key, value, token) {
+  const deviceId = process.env.SISELI_DEVICE_ID;
 
   if (!deviceId) {
-
     throw new Error(
-      "Missing DEVICE_ID in environment variables."
+      "Missing SISELI_DEVICE_ID environment variable."
     );
-
   }
 
-  return deviceId;
-}
-
-
-/*
-=========================================================
-WRITE CONFIG
-=========================================================
-*/
-
-async function writeConfig(key, value) {
-
-  const deviceId =
-    getDeviceId();
-
-  const token =
-    await getValidToken();
-
   const url =
-    `${SISELI_BASE_URL}` +
-    `/apis/remote/device/config/write` +
-    `?deviceId=${deviceId}`;
+    `${SISELI_BASE_URL}/apis/remote/device/config/write` +
+    `?deviceId=${encodeURIComponent(deviceId)}`;
 
-  const bodyString =
-    JSON.stringify({
+  const body = {
+    id: deviceId,
+    key,
+    value: String(value)
+  };
 
-      id: deviceId,
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json; charset=utf-8",
+      "IOT-Time-Zone": "Asia/Singapore",
+      "IOT-Token": token,
+      Origin: "https://solar.siseli.com",
+      Referer: "https://solar.siseli.com/"
+    },
+    body: JSON.stringify(body)
+  });
 
-      key,
-
-      value: String(value)
-
-    });
-
-  const openHeaders =
-    makeOpenHeaders({
-
-      url,
-
-      method: "POST",
-
-      bodyString
-
-    });
-
-  const response =
-    await fetch(url, {
-
-      method: "POST",
-
-      headers: {
-
-        Accept:
-          "application/json",
-
-        "Accept-Language":
-          "en-US",
-
-        "Content-Type":
-          "application/json; charset=utf-8",
-
-        ...openHeaders,
-
-        "IOT-Time-Zone":
-          "Asia/Singapore",
-
-        "IOT-Token":
-          token,
-
-        Origin:
-          "https://solar.siseli.com",
-
-        Referer:
-          "https://solar.siseli.com/",
-
-        "User-Agent":
-          "Mozilla/5.0"
-
-      },
-
-      body: bodyString
-
-    });
-
-
-  const text =
-    await response.text();
+  const text = await response.text();
 
   let data = null;
 
   try {
-
-    data =
-      text
-        ? JSON.parse(text)
-        : null;
-
+    data = text ? JSON.parse(text) : null;
   } catch {
-
     data = text;
-
   }
 
+  console.log("SiSeli write:", {
+    key,
+    value,
+    status: response.status,
+    response: data
+  });
 
-  console.log(
-    "SiSeli WRITE",
-    {
-      key,
-      value,
-      status:
-        response.status,
-      response: data
+  if (!response.ok) {
+    const error = new Error(
+      data?.message ||
+        `SiSeli rejected ${key}=${value} (${response.status})`
+    );
+
+    error.status = response.status;
+    error.responseData = data;
+
+    throw error;
+  }
+
+  if (data && typeof data === "object" && data.code !== undefined) {
+    if (Number(data.code) !== 0) {
+      const error = new Error(
+        data.message ||
+          `SiSeli rejected ${key}=${value}.`
+      );
+
+      error.status = response.status;
+      error.responseData = data;
+
+      throw error;
     }
-  );
+  }
 
+  return data;
+}
 
-  /*
-  If token expired unexpectedly,
-  clear it so the next request
-  performs a fresh login.
-  */
+// ------------------------------------------------------------
+// Write configuration using dynamic token
+// Automatically retries once after token refresh.
+// ------------------------------------------------------------
 
-  if (
-    response.status === 401 ||
-    response.status === 403
-  ) {
+async function writeConfig(key, value) {
+  let token = await getValidToken();
+
+  try {
+    return await writeConfigWithToken(key, value, token);
+  } catch (error) {
+    const status = Number(error?.status);
+
+    const message = String(error?.message || "").toLowerCase();
+
+    const tokenError =
+      status === 401 ||
+      status === 403 ||
+      message.includes("token") ||
+      message.includes("unauthorized") ||
+      message.includes("expired");
+
+    if (!tokenError) {
+      throw error;
+    }
+
+    console.warn(
+      "SiSeli token appears invalid/expired. Refreshing token and retrying..."
+    );
 
     cachedToken = null;
     cachedTokenExpiry = 0;
 
-    throw new Error(
-      `SiSeli authentication failed while writing ${key}.`
+    token = await getValidToken();
+
+    return await writeConfigWithToken(
+      key,
+      value,
+      token
     );
-
   }
-
-
-  if (!response.ok) {
-
-    throw new Error(
-      `SiSeli rejected ${key}=${value} ` +
-      `(${response.status})`
-    );
-
-  }
-
-
-  /*
-  Some SISELI endpoints return HTTP 200
-  but still report an application-level error.
-  */
-
-  if (
-    data &&
-    typeof data === "object" &&
-    data.code !== undefined &&
-    data.code !== 0
-  ) {
-
-    throw new Error(
-      data.message ||
-      `SiSeli rejected ${key}=${value}`
-    );
-
-  }
-
-
-  return data;
-
 }
 
-
-/*
-=========================================================
-HANDLER
-=========================================================
-*/
+// ------------------------------------------------------------
+// API HANDLER
+// ------------------------------------------------------------
 
 export default async function handler(req, res) {
-
   if (req.method !== "POST") {
-
     return res.status(405).json({
-
       ok: false,
-
-      error:
-        "Method not allowed"
-
+      error: "Method not allowed"
     });
-
   }
 
-
   try {
-
     const {
-
       action,
-
       currentSoc,
-
       utilitySoc,
-
-      batterySoc,
-
-      restoreDefaults
-
+      batterySoc
     } = req.body || {};
 
+    const deviceId = process.env.SISELI_DEVICE_ID;
 
-    /*
-    =====================================================
-    START MANUAL GRID CHARGING
-    =====================================================
-    */
+    if (!deviceId) {
+      throw new Error(
+        "Missing SISELI_DEVICE_ID environment variable."
+      );
+    }
 
-    if (
-      action ===
-      "startCharging"
-    ) {
+    // --------------------------------------------------------
+    // START MANUAL GRID CHARGING
+    // --------------------------------------------------------
 
-      const current =
-        Number(currentSoc);
-
-      const requestedUtilitySoc =
-        Number(utilitySoc);
-
-      const target =
-        Number(batterySoc);
-
+    if (action === "startCharging") {
+      const current = Number(currentSoc);
+      const requestedUtilitySoc = Number(utilitySoc);
+      const target = Number(batterySoc);
 
       if (!Number.isFinite(current)) {
-
-        throw new Error(
-          "Invalid current SOC."
-        );
-
+        throw new Error("Invalid current SOC.");
       }
-
 
       if (!Number.isFinite(target)) {
-
-        throw new Error(
-          "Invalid target SOC."
-        );
-
+        throw new Error("Invalid target SOC.");
       }
 
-
       if (target <= current) {
-
         throw new Error(
           `Target SOC ${target}% is not above current SOC ${current}%.`
         );
-
       }
 
+      if (target > 100) {
+        throw new Error("Target SOC cannot exceed 100%.");
+      }
 
       /*
-      IMPORTANT:
+       * During manual charging:
+       *
+       * Utility comeback:
+       *   Set to current SOC or lower.
+       *
+       * Battery comeback:
+       *   Set to user's target SOC.
+       *
+       * Example:
+       *
+       * Current SOC = 48%
+       * Utility comeback = 48%
+       * Battery comeback = 90%
+       *
+       * This forces the inverter to stay on/use utility
+       * until the battery reaches the requested target.
+       */
 
-      Comeback Utility Mode must be
-      <= current SOC.
+      const forcedUtilitySoc = Math.min(
+        Math.floor(current),
+        Number.isFinite(requestedUtilitySoc)
+          ? Math.floor(requestedUtilitySoc)
+          : DEFAULT_GRID_SOC
+      );
 
-      Example:
-
-      Current SOC = 48%
-      Utility = 48%
-      Battery = 90%
-
-      This causes utility charging
-      until the battery reaches 90%.
-      */
-
-      const forcedUtilitySoc =
-        Math.min(
-
-          Math.floor(current),
-
-          Number.isFinite(
-            requestedUtilitySoc
-          )
-            ? Math.floor(
-                requestedUtilitySoc
-              )
-            : Math.floor(current)
-
-        );
-
-
-      const forcedBatterySoc =
-        Math.min(
-
-          Math.max(
-            Math.floor(target),
-            1
-          ),
-
-          100
-
-        );
-
-
-      /*
-      STEP 1
-      Set Comeback Utility Mode
-      */
+      const forcedBatterySoc = Math.min(
+        Math.max(Math.floor(target), 1),
+        100
+      );
 
       console.log(
-        "Setting utility comeback:",
+        "Starting manual charging:",
+        {
+          currentSoc: current,
+          utilitySoc: forcedUtilitySoc,
+          targetSoc: forcedBatterySoc
+        }
+      );
+
+      // FIRST: utility comeback threshold
+      const utilityResult = await writeConfig(
+        "comebackUtilityModeSocPointUnderSBU",
         forcedUtilitySoc
       );
 
-
-      const utilityResult =
-        await writeConfig(
-
-          "comebackUtilityModeSocPointUnderSBU",
-
-          forcedUtilitySoc
-
-        );
-
-
-      /*
-      STEP 2
-      Set Comeback Battery Mode
-      */
-
-      console.log(
-        "Setting battery comeback:",
+      // SECOND: battery comeback threshold
+      const batteryResult = await writeConfig(
+        "comebackBatteryModeSocPoint",
         forcedBatterySoc
       );
 
+      /*
+       * IMPORTANT:
+       * Do NOT restore defaults here.
+       *
+       * Defaults:
+       *   Utility = 22%
+       *   Battery = 35%
+       *
+       * Restoring immediately would cancel the manual
+       * charging configuration.
+       */
 
-      const batteryResult =
-        await writeConfig(
+      return res.status(200).json({
+        ok: true,
+        action: "startCharging",
 
-          "comebackBatteryModeSocPoint",
+        currentSoc: current,
 
-          forcedBatterySoc
+        utilitySoc: forcedUtilitySoc,
 
-        );
+        batterySoc: forcedBatterySoc,
 
+        utilityResult,
+
+        batteryResult,
+
+        message:
+          `Manual grid charging started. ` +
+          `Utility comeback set to ${forcedUtilitySoc}% ` +
+          `and battery target set to ${forcedBatterySoc}%.`
+      });
+    }
+
+    // --------------------------------------------------------
+    // RESTORE DEFAULT SETTINGS
+    // --------------------------------------------------------
+
+    if (action === "restore") {
+      const restoreUtilitySoc = Number.isFinite(
+        Number(utilitySoc)
+      )
+        ? Math.min(
+            Math.max(Math.floor(Number(utilitySoc)), 0),
+            100
+          )
+        : DEFAULT_GRID_SOC;
+
+      const restoreBatterySoc = Number.isFinite(
+        Number(batterySoc)
+      )
+        ? Math.min(
+            Math.max(Math.floor(Number(batterySoc)), 0),
+            100
+          )
+        : DEFAULT_BATTERY_SOC;
+
+      console.log(
+        "Restoring inverter defaults:",
+        {
+          utilitySoc: restoreUtilitySoc,
+          batterySoc: restoreBatterySoc
+        }
+      );
 
       /*
-      DO NOT restore defaults here.
+       * Restore utility first.
+       */
 
-      The inverter needs to remain configured
-      with the temporary values so it can
-      actually perform the grid charging.
-      */
+      const utilityResult = await writeConfig(
+        "comebackUtilityModeSocPointUnderSBU",
+        restoreUtilitySoc
+      );
 
-      return res.status(200).json({
+      /*
+       * Restore battery second.
+       */
 
-        ok: true,
-
-        action:
-          "startCharging",
-
-        currentSoc:
-          current,
-
-        utilitySoc:
-          forcedUtilitySoc,
-
-        batterySoc:
-          forcedBatterySoc,
-
-        utilityResult,
-
-        batteryResult,
-
-        restoreDefaultsRequested:
-          Boolean(restoreDefaults),
-
-        message:
-          `Grid charging configured: ` +
-          `Utility comeback ${forcedUtilitySoc}% ` +
-          `→ Battery comeback ${forcedBatterySoc}%.`
-
-      });
-
-    }
-
-
-    /*
-    =====================================================
-    RESTORE NORMAL SETTINGS
-    =====================================================
-    */
-
-    if (
-      action ===
-      "restore"
-    ) {
-
-      const restoreUtilitySoc =
-        Number.isFinite(
-          Number(utilitySoc)
-        )
-          ? Number(utilitySoc)
-          : DEFAULT_GRID_SOC;
-
-
-      const restoreBatterySoc =
-        Number.isFinite(
-          Number(batterySoc)
-        )
-          ? Number(batterySoc)
-          : DEFAULT_BATTERY_SOC;
-
-
-      const utilityResult =
-        await writeConfig(
-
-          "comebackUtilityModeSocPointUnderSBU",
-
-          restoreUtilitySoc
-
-        );
-
-
-      const batteryResult =
-        await writeConfig(
-
-          "comebackBatteryModeSocPoint",
-
-          restoreBatterySoc
-
-        );
-
+      const batteryResult = await writeConfig(
+        "comebackBatteryModeSocPoint",
+        restoreBatterySoc
+      );
 
       return res.status(200).json({
-
         ok: true,
+        action: "restore",
 
-        action:
-          "restore",
+        utilitySoc: restoreUtilitySoc,
 
-        utilitySoc:
-          restoreUtilitySoc,
-
-        batterySoc:
-          restoreBatterySoc,
+        batterySoc: restoreBatterySoc,
 
         utilityResult,
 
         batteryResult,
 
         message:
-          "Default SOC settings restored."
-
+          `Inverter SOC settings restored: ` +
+          `Utility ${restoreUtilitySoc}%, ` +
+          `Battery ${restoreBatterySoc}%.`
       });
-
     }
-
 
     return res.status(400).json({
-
       ok: false,
-
-      error:
-        `Unknown control action: ${action}`
-
+      error: `Unknown control action: ${action}`
     });
-
-
   } catch (error) {
-
     console.error(
       "SiSeli control error:",
       error
     );
 
-
     return res.status(500).json({
-
       ok: false,
-
       error:
-        error.message ||
+        error?.message ||
         "Unknown control error"
-
     });
-
   }
-
 }
