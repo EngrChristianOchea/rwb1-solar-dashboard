@@ -1033,61 +1033,114 @@ export default function App() {
       setWeatherError(error.message);
     }
   }
-async function startCharging() {
-  const response = await fetch("/api/control", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify({
-      action: "startCharging"
-    })
-  });
+async function startCharging(requestedTargetSoc = targetSoc) {
+  try {
+    setControlBusy(true);
 
-  const data = await response.json();
+    const currentSoc = Number(solar?.battery_soc_percent);
 
-  if (!response.ok || !data.ok) {
-    throw new Error(data.error || "Failed to start charging");
+    if (!Number.isFinite(currentSoc)) {
+      throw new Error("Unable to read current battery SOC.");
+    }
+
+    const target = Number(requestedTargetSoc);
+
+    if (!Number.isFinite(target) || target <= 0 || target > 100) {
+      throw new Error("Invalid target SOC.");
+    }
+
+    if (target <= currentSoc) {
+      throw new Error(
+        `Target SOC (${target}%) must be higher than current SOC (${currentSoc}%).`
+      );
+    }
+
+    /*
+     * Important:
+     *
+     * Comeback Utility Mode must be <= current battery SOC.
+     * This forces the inverter to use utility/grid.
+     *
+     * Comeback Battery Mode SOC becomes the desired
+     * charging target.
+     */
+    const utilitySoc = Math.min(
+      DEFAULT_GRID_SOC,
+      Math.max(0, Math.floor(currentSoc))
+    );
+
+    const response = await fetch("/api/control", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        action: "startCharging",
+        currentSoc,
+        utilitySoc,
+        batterySoc: target,
+        restoreDefaults
+      })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok || !data.ok) {
+      throw new Error(data.error || "Failed to start charging.");
+    }
+
+    alert(
+      `Grid charging command sent.\n\n` +
+      `Current SOC: ${currentSoc}%\n` +
+      `Utility comeback: ${utilitySoc}%\n` +
+      `Target SOC: ${target}%`
+    );
+
+    await fetchSolar();
+
+    return data;
+  } catch (error) {
+    console.error("Start charging error:", error);
+    alert(error.message || "Failed to start charging.");
+    throw error;
+  } finally {
+    setControlBusy(false);
   }
-
-  return data;
 }
-async function restoreDefaultSoc(){
 
-    try{
+async function restoreDefaultSoc() {
+  try {
+    setControlBusy(true);
 
-        setControlBusy(true);
+    const response = await fetch("/api/control", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        action: "restore",
+        utilitySoc: DEFAULT_GRID_SOC,
+        batterySoc: DEFAULT_BATTERY_SOC
+      })
+    });
 
-        await fetch("/api/control",{
+    const data = await response.json();
 
-            method:"POST",
-
-            headers:{
-                "Content-Type":"application/json"
-            },
-
-            body:JSON.stringify({
-
-                action:"restore",
-
-                utilitySoc:22,
-
-                batterySoc:35
-
-            })
-
-        });
-
-        alert("Defaults restored.");
-
+    if (!response.ok || !data.ok) {
+      throw new Error(data.error || "Failed to restore defaults.");
     }
 
-    finally{
+    alert("Default SOC settings restored.");
 
-        setControlBusy(false);
+    await fetchSolar();
 
-    }
-
+    return data;
+  } catch (error) {
+    console.error("Restore error:", error);
+    alert(error.message || "Failed to restore defaults.");
+  } finally {
+    setControlBusy(false);
+  }
 }
 
   useEffect(() => {
@@ -1709,21 +1762,14 @@ async function restoreDefaultSoc(){
 
     </label>
 
-    <label className="checkbox">
-
-        <input
-
-            type="checkbox"
-
-            checked={restoreDefaults}
-
-            onChange={(e)=>setRestoreDefaults(e.target.checked)}
-
-        />
-
-        Restore defaults afterwards
-
-    </label>
+<label className="checkbox">
+  <input
+    type="checkbox"
+    checked={restoreDefaults}
+    onChange={(e) => setRestoreDefaults(e.target.checked)}
+  />
+  Restore defaults after charging
+</label>
 
     <button
 
@@ -1743,17 +1789,32 @@ async function restoreDefaultSoc(){
 
 <div className="quick-actions">
 
-    <button onClick={()=>startCharging(80)}>
-        Charge to 80%
-    </button>
+<button
+  className="mini-btn"
+  type="button"
+  onClick={() => startCharging(80)}
+  disabled={controlBusy}
+>
+  Charge to 80%
+</button>
 
-    <button onClick={()=>startCharging(90)}>
-        Charge to 90%
-    </button>
+<button
+  className="mini-btn"
+  type="button"
+  onClick={() => startCharging(90)}
+  disabled={controlBusy}
+>
+  Charge to 90%
+</button>
 
-    <button onClick={()=>startCharging(100)}>
-        Charge to 100%
-    </button>
+<button
+  className="mini-btn"
+  type="button"
+  onClick={() => startCharging(100)}
+  disabled={controlBusy}
+>
+  Charge to 100%
+</button>
 
 </div>
 
