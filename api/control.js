@@ -459,7 +459,7 @@ export default async function handler(req, res) {
 
       // SECOND: battery comeback threshold
       const batteryResult = await writeConfig(
-        "comebackBatteryModeSocPoint",
+        "comebackBatteryModeSocPointUnderSBU",
         forcedBatterySoc
       );
 
@@ -541,7 +541,7 @@ export default async function handler(req, res) {
        */
 
       const batteryResult = await writeConfig(
-        "comebackBatteryModeSocPoint",
+        "comebackBatteryModeSocPointUnderSBU",
         restoreBatterySoc
       );
 
