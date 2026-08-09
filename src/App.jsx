@@ -935,9 +935,8 @@ export default function App() {
 
    const [targetSoc, setTargetSoc] = useState(90);
 
-   const [restoreDefaults, setRestoreDefaults] = useState(true);
-
    const [controlBusy, setControlBusy] = useState(false);
+   const [manualCharging, setManualCharging] = useState(false);
 
    const DEFAULT_GRID_SOC = 22;
 
@@ -1033,19 +1032,18 @@ export default function App() {
       setWeatherError(error.message);
     }
   }
-async function startCharging(requestedTargetSoc = targetSoc) {
+async function startCharging(target = targetSoc) {
   try {
     setControlBusy(true);
 
     const currentSoc = Number(solar?.battery_soc_percent);
+    const target = Number(target);
 
     if (!Number.isFinite(currentSoc)) {
-      throw new Error("Unable to read current battery SOC.");
+      throw new Error("Current battery SOC is not available.");
     }
 
-    const target = Number(requestedTargetSoc);
-
-    if (!Number.isFinite(target) || target <= 0 || target > 100) {
+    if (!Number.isFinite(target)) {
       throw new Error("Invalid target SOC.");
     }
 
@@ -1055,19 +1053,7 @@ async function startCharging(requestedTargetSoc = targetSoc) {
       );
     }
 
-    /*
-     * Important:
-     *
-     * Comeback Utility Mode must be <= current battery SOC.
-     * This forces the inverter to use utility/grid.
-     *
-     * Comeback Battery Mode SOC becomes the desired
-     * charging target.
-     */
-    const utilitySoc = Math.min(
-      DEFAULT_GRID_SOC,
-      Math.max(0, Math.floor(currentSoc))
-    );
+    const utilitySoc = Math.floor(currentSoc);
 
     const response = await fetch("/api/control", {
       method: "POST",
@@ -1078,36 +1064,147 @@ async function startCharging(requestedTargetSoc = targetSoc) {
         action: "startCharging",
         currentSoc,
         utilitySoc,
-        batterySoc: target,
-        restoreDefaults
+        batterySoc: target
       })
     });
 
     const data = await response.json();
 
     if (!response.ok || !data.ok) {
-      throw new Error(data.error || "Failed to start charging.");
+      throw new Error(
+        data.error || "Failed to start charging"
+      );
     }
 
+    setTargetSoc(target);
+    setManualCharging(true);
+
     alert(
-      `Grid charging command sent.\n\n` +
+      `Manual grid charging started.\n\n` +
       `Current SOC: ${currentSoc}%\n` +
-      `Utility comeback: ${utilitySoc}%\n` +
-      `Target SOC: ${target}%`
+      `Utility comeback: ${data.utilitySoc}%\n` +
+      `Target SOC: ${data.batterySoc}%`
     );
 
     await fetchSolar();
 
     return data;
+
   } catch (error) {
     console.error("Start charging error:", error);
-    alert(error.message || "Failed to start charging.");
+
+    alert(
+      `Failed to start charging:\n\n${error.message}`
+    );
+
     throw error;
+
   } finally {
     setControlBusy(false);
   }
 }
+async function completeManualCharging() {
+  if (!manualCharging || controlBusy) {
+    return;
+  }
 
+  try {
+    setControlBusy(true);
+
+    const response = await fetch("/api/control", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        action: "restore",
+        utilitySoc: 22,
+        batterySoc: 35
+      })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok || !data.ok) {
+      throw new Error(
+        data.error || "Failed to restore default SOC settings."
+      );
+    }
+
+    setManualCharging(false);
+
+    await fetchSolar();
+
+    alert(
+      `Target SOC reached (${targetSoc}%).\n\n` +
+      `Default inverter settings restored:\n` +
+      `Utility SOC: 22%\n` +
+      `Battery SOC: 35%`
+    );
+
+  } catch (error) {
+    console.error(
+      "Automatic restore error:",
+      error
+    );
+
+    alert(
+      `Charging reached the target, but the default settings could not be restored:\n\n${error.message}`
+    );
+
+  } finally {
+    setControlBusy(false);
+  }
+}
+async function stopManualCharging() {
+  try {
+    setControlBusy(true);
+
+    const response = await fetch("/api/control", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        action: "restore",
+        utilitySoc: 22,
+        batterySoc: 35
+      })
+    });
+
+    const data = await response.json();
+
+    if (!response.ok || !data.ok) {
+      throw new Error(
+        data.error || "Failed to restore default settings."
+      );
+    }
+
+    setManualCharging(false);
+
+    await fetchSolar();
+
+    alert(
+      "Manual charging stopped.\n\n" +
+      "Default inverter settings restored:\n" +
+      "Utility SOC: 22%\n" +
+      "Battery SOC: 35%"
+    );
+
+  } catch (error) {
+    console.error(
+      "Stop charging error:",
+      error
+    );
+
+    alert(
+      `Failed to stop manual charging:\n\n${error.message}`
+    );
+
+  } finally {
+    setControlBusy(false);
+  }
+}
 async function restoreDefaultSoc() {
   try {
     setControlBusy(true);
@@ -1119,25 +1216,35 @@ async function restoreDefaultSoc() {
       },
       body: JSON.stringify({
         action: "restore",
-        utilitySoc: DEFAULT_GRID_SOC,
-        batterySoc: DEFAULT_BATTERY_SOC
+        utilitySoc: 22,
+        batterySoc: 35
       })
     });
 
     const data = await response.json();
 
     if (!response.ok || !data.ok) {
-      throw new Error(data.error || "Failed to restore defaults.");
+      throw new Error(
+        data.error || "Failed to restore defaults."
+      );
     }
 
-    alert("Default SOC settings restored.");
+    setManualCharging(false);
 
     await fetchSolar();
 
-    return data;
+    alert("Default SOC settings restored.");
+
   } catch (error) {
-    console.error("Restore error:", error);
-    alert(error.message || "Failed to restore defaults.");
+    console.error(
+      "Restore error:",
+      error
+    );
+
+    alert(
+      `Failed to restore defaults:\n\n${error.message}`
+    );
+
   } finally {
     setControlBusy(false);
   }
@@ -1149,7 +1256,27 @@ async function restoreDefaultSoc() {
     const timer = setInterval(fetchSolar, 30000);
     return () => clearInterval(timer);
   }, []);
+useEffect(() => {
+  if (!manualCharging) return;
 
+  const currentSoc = Number(solar?.battery_soc_percent);
+  const target = Number(targetSoc);
+
+  if (
+    !Number.isFinite(currentSoc) ||
+    !Number.isFinite(target)
+  ) {
+    return;
+  }
+
+  if (currentSoc >= target) {
+    completeManualCharging();
+  }
+}, [
+  solar?.battery_soc_percent,
+  manualCharging,
+  targetSoc
+]);
   useEffect(() => {
     fetchWeather();
   }, [
@@ -1762,15 +1889,15 @@ async function restoreDefaultSoc() {
 
     </label>
 
-<label className="checkbox">
-  <input
-    type="checkbox"
-    checked={restoreDefaults}
-    onChange={(e) => setRestoreDefaults(e.target.checked)}
-  />
-  Restore defaults after charging
-</label>
-
+<div className="control-note">
+  <strong>Charging mode</strong>
+  <p>
+    Start Charging temporarily changes the Comeback Utility Mode
+    and Comeback Battery Mode settings. The inverter will remain in
+    the charging configuration until you manually restore the default
+    settings after charging is complete.
+  </p>
+</div>
     <button
 
         className="primary-btn"
