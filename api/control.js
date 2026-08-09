@@ -1,27 +1,41 @@
 // api/control.js
+//
+// Solar of Things inverter control API
+//
+// Supported actions:
+//   startCharging
+//   stopCharging
+//   setChargingCurrent
+//   setBatteryCV
+//   setBatteryFloat
+//   setValue
+//
+// IMPORTANT:
+// This file must be deployed as:
+//   /api/control.js
+//
+// The frontend should call:
+//   POST /api/control
+//
 
 import dotenv from "dotenv";
 import CryptoJS from "crypto-js";
 
 dotenv.config({ path: ".env.local" });
 
-// ============================================================
-// Solar of Things / SISELI configuration
-// ============================================================
-
-const BASE_URL = "https://solar.siseli.com/apis";
-
 const OPEN_APP_ID = "rBrTRfAPXz";
 
 const ENCRYPTED_OPEN_APP_SECRET =
   "I4D0KRr2339z3pQ/at91V9BpFAOe54DaTafwSm6suIQ=";
 
-// Token cache
+const BASE_URL = "https://solar.siseli.com/apis";
+
 let cachedToken = null;
 let cachedTokenExpiry = 0;
 
+
 // ============================================================
-// Utility functions
+// Utility
 // ============================================================
 
 function randomNonce(length = 32) {
@@ -36,6 +50,7 @@ function randomNonce(length = 32) {
 
   return result;
 }
+
 
 function decryptOpenSecret(appId, encryptedSecret) {
   const md5 = CryptoJS.MD5(appId).toString().toLowerCase();
@@ -55,6 +70,7 @@ function decryptOpenSecret(appId, encryptedSecret) {
   return decrypted.toString(CryptoJS.enc.Utf8).trim();
 }
 
+
 function sortObject(obj) {
   return Object.keys(obj)
     .sort()
@@ -64,11 +80,13 @@ function sortObject(obj) {
     }, {});
 }
 
+
 function stringifyQueryNoEncode(obj) {
   return Object.entries(obj)
     .map(([key, value]) => `${key}=${value}`)
     .join("&");
 }
+
 
 function getBodyHash(method, bodyString) {
   if (method.toUpperCase() === "GET") {
@@ -79,14 +97,13 @@ function getBodyHash(method, bodyString) {
     return "";
   }
 
-  return CryptoJS.SHA256(CryptoJS.enc.Utf8.parse(bodyString))
+  return CryptoJS.SHA256(
+    CryptoJS.enc.Utf8.parse(bodyString)
+  )
     .toString()
     .toLowerCase();
 }
 
-// ============================================================
-// Open API signing
-// ============================================================
 
 function makeOpenHeaders({ url, method, bodyString }) {
   const nonce = randomNonce(32);
@@ -106,35 +123,42 @@ function makeOpenHeaders({ url, method, bodyString }) {
     }
   }
 
-  signParams["IOT-Open-Body-Hash"] = getBodyHash(
-    method,
-    bodyString
-  );
+  signParams["IOT-Open-Body-Hash"] =
+    getBodyHash(method, bodyString);
 
-  signParams["IOT-Open-AppID"] = OPEN_APP_ID;
-  signParams["IOT-Open-Nonce"] = nonce;
+  signParams["IOT-Open-AppID"] =
+    OPEN_APP_ID;
 
-  const sortedParams = sortObject(signParams);
+  signParams["IOT-Open-Nonce"] =
+    nonce;
 
-  const queryString = stringifyQueryNoEncode(sortedParams);
+  const sortedParams =
+    sortObject(signParams);
 
-  const queryBase64 = CryptoJS.enc.Base64.stringify(
-    CryptoJS.enc.Utf8.parse(queryString)
-  );
+  const queryString =
+    stringifyQueryNoEncode(sortedParams);
 
-  const openSecret = decryptOpenSecret(
-    OPEN_APP_ID,
-    ENCRYPTED_OPEN_APP_SECRET
-  );
+  const queryBase64 =
+    CryptoJS.enc.Base64.stringify(
+      CryptoJS.enc.Utf8.parse(queryString)
+    );
 
-  const hmac = CryptoJS.HmacSHA256(
-    queryBase64,
-    openSecret
-  );
+  const openSecret =
+    decryptOpenSecret(
+      OPEN_APP_ID,
+      ENCRYPTED_OPEN_APP_SECRET
+    );
 
-  const sign = CryptoJS.MD5(hmac)
-    .toString()
-    .toLowerCase();
+  const hmac =
+    CryptoJS.HmacSHA256(
+      queryBase64,
+      openSecret
+    );
+
+  const sign =
+    CryptoJS.MD5(hmac)
+      .toString()
+      .toLowerCase();
 
   return {
     "IOT-Open-AppID": OPEN_APP_ID,
@@ -143,13 +167,18 @@ function makeOpenHeaders({ url, method, bodyString }) {
   };
 }
 
+
 // ============================================================
 // Login
 // ============================================================
 
 async function loginToSolarOfThings() {
-  const account = process.env.SOT_ACCOUNT;
-  const password = process.env.SOT_PASSWORD_HASH;
+
+  const account =
+    process.env.SOT_ACCOUNT;
+
+  const password =
+    process.env.SOT_PASSWORD_HASH;
 
   if (!account || !password) {
     throw new Error(
@@ -157,41 +186,56 @@ async function loginToSolarOfThings() {
     );
   }
 
-  const url = `${BASE_URL}/login/account`;
+  const url =
+    `${BASE_URL}/login/account`;
 
-  const bodyString = JSON.stringify({
-    account,
-    password
-  });
+  const bodyString =
+    JSON.stringify({
+      account,
+      password
+    });
 
-  const openHeaders = makeOpenHeaders({
-    url,
-    method: "POST",
-    bodyString
-  });
+  const openHeaders =
+    makeOpenHeaders({
+      url,
+      method: "POST",
+      bodyString
+    });
 
-  const response = await fetch(url, {
-    method: "POST",
+  const response =
+    await fetch(url, {
+      method: "POST",
 
-    headers: {
-      Accept: "application/json",
-      "Accept-Language": "en-US",
-      "Content-Type": "application/json; charset=utf-8",
+      headers: {
+        Accept: "application/json",
+        "Accept-Language": "en-US",
 
-      ...openHeaders,
+        "Content-Type":
+          "application/json; charset=utf-8",
 
-      "IOT-Time-Zone": "Asia/Singapore",
-      "IOT-Token": "null",
+        ...openHeaders,
 
-      Origin: "https://solar.siseli.com",
-      Referer: "https://solar.siseli.com/",
-      "User-Agent": "Mozilla/5.0"
-    },
+        "IOT-Time-Zone":
+          "Asia/Singapore",
 
-    body: bodyString
-  });
+        "IOT-Token":
+          "null",
 
-  const text = await response.text();
+        Origin:
+          "https://solar.siseli.com",
+
+        Referer:
+          "https://solar.siseli.com/",
+
+        "User-Agent":
+          "Mozilla/5.0"
+      },
+
+      body: bodyString
+    });
+
+  const text =
+    await response.text();
 
   let json;
 
@@ -199,7 +243,7 @@ async function loginToSolarOfThings() {
     json = JSON.parse(text);
   } catch {
     throw new Error(
-      `Solar login returned non-JSON response (HTTP ${response.status}): ${text.substring(
+      `Solar login returned non-JSON response (${response.status}): ${text.substring(
         0,
         300
       )}`
@@ -209,11 +253,12 @@ async function loginToSolarOfThings() {
   if (!response.ok || json.code !== 0) {
     throw new Error(
       json.message ||
-        `Solar login failed with HTTP ${response.status}.`
+      `Solar login failed with HTTP ${response.status}`
     );
   }
 
-  const accessToken = json?.data?.accessToken;
+  const accessToken =
+    json?.data?.accessToken;
 
   const expiresAt =
     json?.data?.accessTokenWillExpiredAt;
@@ -224,25 +269,32 @@ async function loginToSolarOfThings() {
     );
   }
 
-  cachedToken = accessToken;
+  cachedToken =
+    accessToken;
 
-  cachedTokenExpiry = expiresAt
-    ? new Date(expiresAt).getTime()
-    : Date.now() + 60 * 60 * 1000;
+  cachedTokenExpiry =
+    expiresAt
+      ? new Date(expiresAt).getTime()
+      : Date.now() + 60 * 60 * 1000;
 
   return accessToken;
 }
+
 
 // ============================================================
 // Get valid token
 // ============================================================
 
 async function getValidToken() {
-  const now = Date.now();
+
+  const now =
+    Date.now();
 
   if (
     cachedToken &&
-    now < cachedTokenExpiry - 5 * 60 * 1000
+    now <
+      cachedTokenExpiry -
+        5 * 60 * 1000
   ) {
     return cachedToken;
   }
@@ -250,12 +302,136 @@ async function getValidToken() {
   return loginToSolarOfThings();
 }
 
+
+// ============================================================
+// Solar API request
+// ============================================================
+
+async function solarRequest(
+  url,
+  options = {}
+) {
+
+  let token =
+    await getValidToken();
+
+  let response =
+    await fetch(url, {
+      ...options,
+
+      headers: {
+        Accept:
+          "application/json",
+
+        "Accept-Language":
+          "en-US",
+
+        "IOT-Time-Zone":
+          "Asia/Singapore",
+
+        "IOT-Token":
+          token,
+
+        Origin:
+          "https://solar.siseli.com",
+
+        Referer:
+          "https://solar.siseli.com/",
+
+        "User-Agent":
+          "Mozilla/5.0",
+
+        ...(options.headers || {})
+      }
+    });
+
+  /*
+   * If the token expired unexpectedly,
+   * login once more and retry.
+   */
+
+  if (
+    response.status === 401 ||
+    response.status === 403
+  ) {
+
+    cachedToken = null;
+    cachedTokenExpiry = 0;
+
+    token =
+      await getValidToken();
+
+    response =
+      await fetch(url, {
+        ...options,
+
+        headers: {
+          Accept:
+            "application/json",
+
+          "Accept-Language":
+            "en-US",
+
+          "IOT-Time-Zone":
+            "Asia/Singapore",
+
+          "IOT-Token":
+            token,
+
+          Origin:
+            "https://solar.siseli.com",
+
+          Referer:
+            "https://solar.siseli.com/",
+
+          "User-Agent":
+            "Mozilla/5.0",
+
+          ...(options.headers || {})
+        }
+      });
+  }
+
+  const text =
+    await response.text();
+
+  let json = null;
+
+  try {
+    json =
+      text
+        ? JSON.parse(text)
+        : null;
+  } catch {
+    throw new Error(
+      `Solar API returned non-JSON response (${response.status}): ${text.substring(
+        0,
+        500
+      )}`
+    );
+  }
+
+  if (!response.ok) {
+    throw new Error(
+      json?.message ||
+      json?.error ||
+      `Solar API HTTP ${response.status}`
+    );
+  }
+
+  return json;
+}
+
+
 // ============================================================
 // Device ID
 // ============================================================
 
 function getDeviceId() {
-  const deviceId = process.env.DEVICE_ID;
+
+  const deviceId =
+    process.env.DEVICE_ID ||
+    process.env.SISELI_DEVICE_ID;
 
   if (!deviceId) {
     throw new Error(
@@ -266,464 +442,536 @@ function getDeviceId() {
   return deviceId;
 }
 
+
 // ============================================================
-// Solar API request helper
+// WRITE CONFIG
 // ============================================================
 
-async function solarRequest(
-  path,
-  {
-    method = "GET",
-    body = null,
-    retry = true
-  } = {}
+async function writeConfig(
+  key,
+  value
 ) {
-  const token = await getValidToken();
 
-  const url = `${BASE_URL}${path}`;
+  const deviceId =
+    getDeviceId();
 
-  const bodyString =
-    body !== null
-      ? JSON.stringify(body)
-      : "";
+  const url =
+    `${BASE_URL}/remote/device/config/write` +
+    `?deviceId=${encodeURIComponent(deviceId)}`;
 
-  const openHeaders = makeOpenHeaders({
-    url,
-    method,
-    bodyString
-  });
+  /*
+   * IMPORTANT:
+   * Siseli's actual request uses:
+   *
+   * {
+   *   "id": "<DEVICE_ID>",
+   *   "key": "...",
+   *   "value": "..."
+   * }
+   */
 
-  const response = await fetch(url, {
-    method,
-
-    headers: {
-      Accept: "application/json",
-      "Accept-Language": "en-US",
-
-      ...(body !== null
-        ? {
-            "Content-Type":
-              "application/json; charset=utf-8"
-          }
-        : {}),
-
-      ...openHeaders,
-
-      "IOT-Time-Zone": "Asia/Singapore",
-      "IOT-Token": token,
-
-      Origin: "https://solar.siseli.com",
-      Referer: "https://solar.siseli.com/",
-      "User-Agent": "Mozilla/5.0"
-    },
-
-    ...(body !== null
-      ? {
-          body: bodyString
-        }
-      : {})
-  });
-
-  const text = await response.text();
-
-  let json;
-
-  try {
-    json = JSON.parse(text);
-  } catch {
-    if (response.status === 401 && retry) {
-      cachedToken = null;
-      cachedTokenExpiry = 0;
-
-      return solarRequest(path, {
-        method,
-        body,
-        retry: false
-      });
-    }
-
-    throw new Error(
-      `Solar API returned non-JSON response (HTTP ${response.status}): ${text.substring(
-        0,
-        300
-      )}`
-    );
-  }
-
-  // Token expired / unauthorized
-  if (
-    (response.status === 401 ||
-      json?.code === 401 ||
-      json?.code === 1001) &&
-    retry
-  ) {
-    cachedToken = null;
-    cachedTokenExpiry = 0;
-
-    return solarRequest(path, {
-      method,
-      body,
-      retry: false
+  const body =
+    JSON.stringify({
+      id: deviceId,
+      key,
+      value: String(value)
     });
-  }
 
-  if (!response.ok) {
-    throw new Error(
-      json?.message ||
-        `Solar API HTTP ${response.status}.`
+  console.log(
+    "Siseli WRITE:",
+    {
+      deviceId,
+      key,
+      value: String(value)
+    }
+  );
+
+  const result =
+    await solarRequest(
+      url,
+      {
+        method: "POST",
+
+        headers: {
+          "Content-Type":
+            "application/json; charset=utf-8"
+        },
+
+        body
+      }
     );
-  }
 
-  if (
-    json?.code !== undefined &&
-    json.code !== 0
-  ) {
-    throw new Error(
-      json.message ||
-        `Solar API returned error code ${json.code}.`
-    );
-  }
-
-  return json;
+  return result;
 }
 
+
 // ============================================================
-// Read latest inverter state
+// READ LATEST STATE
 // ============================================================
 
 async function getLatestState() {
-  const deviceId = getDeviceId();
+
+  const deviceId =
+    getDeviceId();
+
+  const url =
+    `${BASE_URL}/deviceState/simple/state/latest/v1` +
+    `?deviceId=${encodeURIComponent(deviceId)}` +
+    `&dataSource=1`;
 
   return solarRequest(
-    `/deviceState/simple/state/latest/v1?deviceId=${encodeURIComponent(
-      deviceId
-    )}&dataSource=1`,
+    url,
     {
       method: "GET"
     }
   );
 }
 
+
 // ============================================================
-// Write inverter configuration
+// CHARGING FUNCTIONS
 // ============================================================
 
-async function writeConfig(key, value) {
-  const deviceId = getDeviceId();
+async function startCharging() {
 
-  return solarRequest(
-    `/remote/device/config/write?deviceId=${encodeURIComponent(
-      deviceId
-    )}`,
-    {
-      method: "POST",
+  /*
+   * This follows the exact configuration
+   * write observed from Siseli.
+   *
+   * 60A is the example value captured
+   * from the Siseli UI.
+   */
 
-      body: {
-        id: deviceId,
-        key,
-        value
-      }
-    }
-  );
+  const result =
+    await writeConfig(
+      "setMaxChargingCurrent",
+      "60"
+    );
+
+  return {
+    action: "startCharging",
+    key: "setMaxChargingCurrent",
+    value: "60",
+    result
+  };
 }
 
-// ============================================================
-// Configuration functions
-// ============================================================
 
-async function setBatteryCV(voltage) {
-  return writeConfig(
-    "setBatteryCVChargeVoltage",
-    voltage
-  );
+async function stopCharging() {
+
+  /*
+   * Set charging current to zero.
+   */
+
+  const result =
+    await writeConfig(
+      "setMaxChargingCurrent",
+      "0"
+    );
+
+  return {
+    action: "stopCharging",
+    key: "setMaxChargingCurrent",
+    value: "0",
+    result
+  };
 }
 
-async function setBatteryFloat(voltage) {
-  return writeConfig(
-    "setBatteryFloatChargeVoltage",
-    voltage
-  );
-}
 
-// ============================================================
-// Start charging
-// ============================================================
-//
-// IMPORTANT:
-// The actual Solar of Things configuration keys are kept
-// together here so they can easily be changed if your
-// inverter uses different parameter names.
-//
-// Target SOC is handled by the frontend/backend workflow.
-// The voltage values below are the charge voltages you were
-// previously using.
-//
-// ============================================================
-
-async function startCharging(targetSoc) {
-  const soc = Number(targetSoc);
+async function setChargingCurrent(
+  current
+) {
 
   if (
-    !Number.isFinite(soc) ||
-    soc < 0 ||
-    soc > 100
+    current === undefined ||
+    current === null ||
+    Number.isNaN(Number(current))
   ) {
     throw new Error(
-      "Invalid target SOC. Please use a value from 0 to 100."
+      "Charging current is required."
     );
   }
 
-  /*
-   * Your current UI allows 80 / 90 / 100%.
-   *
-   * We first set the charge voltage configuration.
-   *
-   * NOTE:
-   * The exact SOC-control configuration key used by
-   * your inverter/API has not been established from the
-   * files provided so far.
-   *
-   * Therefore this function does NOT invent an undocumented
-   * SOC API key.
-   */
+  const value =
+    Number(current);
 
-  const results = [];
+  if (value < 0 || value > 120) {
+    throw new Error(
+      "Charging current must be between 0A and 120A."
+    );
+  }
 
-  // ----------------------------------------------------------
-  // Battery CV voltage
-  // ----------------------------------------------------------
-
-  const cvVoltage =
-    Number(process.env.CHARGE_CV_VOLTAGE) || 54.0;
-
-  results.push({
-    setting: "setBatteryCVChargeVoltage",
-    value: cvVoltage,
-    result: await setBatteryCV(cvVoltage)
-  });
-
-  // ----------------------------------------------------------
-  // Float voltage
-  // ----------------------------------------------------------
-
-  const floatVoltage =
-    Number(process.env.CHARGE_FLOAT_VOLTAGE) || 53.5;
-
-  results.push({
-    setting: "setBatteryFloatChargeVoltage",
-    value: floatVoltage,
-    result: await setBatteryFloat(floatVoltage)
-  });
+  const result =
+    await writeConfig(
+      "setMaxChargingCurrent",
+      String(value)
+    );
 
   return {
-    ok: true,
+    action:
+      "setChargingCurrent",
 
-    action: "startCharging",
+    key:
+      "setMaxChargingCurrent",
 
-    targetSoc: soc,
+    value:
+      String(value),
 
-    message: `Charging configuration applied for target SOC ${soc}%.`,
-
-    results
+    result
   };
 }
 
+
 // ============================================================
-// Restore inverter configuration
+// Battery voltage functions
 // ============================================================
 
-async function restoreDefaults(body = {}) {
-  /*
-   * App.jsx sends:
-   *
-   * {
-   *   utilitySoc,
-   *   batterySoc
-   * }
-   *
-   * We accept these values so the endpoint is compatible
-   * with the existing frontend.
-   */
+async function setBatteryCV(
+  voltage
+) {
 
-  const utilitySoc =
-    body?.utilitySoc !== undefined
-      ? Number(body.utilitySoc)
-      : null;
-
-  const batterySoc =
-    body?.batterySoc !== undefined
-      ? Number(body.batterySoc)
-      : null;
-
-  const results = [];
-
-  /*
-   * Restore values can optionally be configured through
-   * Vercel environment variables.
-   *
-   * Example:
-   *
-   * RESTORE_CV_VOLTAGE=52.5
-   * RESTORE_FLOAT_VOLTAGE=52.0
-   */
-
-  const restoreCv =
-    Number(process.env.RESTORE_CV_VOLTAGE);
-
-  const restoreFloat =
-    Number(process.env.RESTORE_FLOAT_VOLTAGE);
-
-  if (Number.isFinite(restoreCv)) {
-    results.push({
-      setting: "setBatteryCVChargeVoltage",
-      value: restoreCv,
-      result: await setBatteryCV(restoreCv)
-    });
+  if (
+    voltage === undefined ||
+    voltage === null
+  ) {
+    throw new Error(
+      "Battery CV voltage is required."
+    );
   }
 
-  if (Number.isFinite(restoreFloat)) {
-    results.push({
-      setting: "setBatteryFloatChargeVoltage",
-      value: restoreFloat,
-      result: await setBatteryFloat(
-        restoreFloat
-      )
-    });
-  }
-
-  return {
-    ok: true,
-
-    action: "restore",
-
-    utilitySoc,
-
-    batterySoc,
-
-    message:
-      "Restore configuration request completed.",
-
-    results
-  };
+  return writeConfig(
+    "setBatteryCVChargeVoltage",
+    String(voltage)
+  );
 }
 
+
+async function setBatteryFloat(
+  voltage
+) {
+
+  if (
+    voltage === undefined ||
+    voltage === null
+  ) {
+    throw new Error(
+      "Battery float voltage is required."
+    );
+  }
+
+  return writeConfig(
+    "setBatteryFloatChargeVoltage",
+    String(voltage)
+  );
+}
+
+
 // ============================================================
-// HTTP Handler
+// Generic configuration
 // ============================================================
 
-export default async function handler(req, res) {
-  // Always tell frontend we're returning JSON
+async function setValue(
+  key,
+  value
+) {
+
+  if (!key) {
+    throw new Error(
+      "Configuration key is required."
+    );
+  }
+
+  if (
+    value === undefined ||
+    value === null
+  ) {
+    throw new Error(
+      "Configuration value is required."
+    );
+  }
+
+  return writeConfig(
+    key,
+    value
+  );
+}
+
+
+// ============================================================
+// HTTP HANDLER
+// ============================================================
+
+export default async function handler(
+  req,
+  res
+) {
+
+  /*
+   * CORS
+   */
+
   res.setHeader(
-    "Content-Type",
-    "application/json; charset=utf-8"
+    "Access-Control-Allow-Origin",
+    "*"
   );
 
-  try {
-    // --------------------------------------------------------
-    // Only POST is allowed
-    // --------------------------------------------------------
+  res.setHeader(
+    "Access-Control-Allow-Methods",
+    "GET,POST,OPTIONS"
+  );
 
-    if (req.method !== "POST") {
-      return res.status(405).json({
-        ok: false,
-        error: "Method not allowed. Use POST."
-      });
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Content-Type"
+  );
+
+  if (req.method === "OPTIONS") {
+    return res
+      .status(200)
+      .end();
+  }
+
+
+  try {
+
+    /*
+     * GET = read latest inverter state
+     */
+
+    if (req.method === "GET") {
+
+      const result =
+        await getLatestState();
+
+      return res
+        .status(200)
+        .json({
+          ok: true,
+          result
+        });
     }
 
-    // --------------------------------------------------------
-    // Parse body safely
-    // --------------------------------------------------------
 
-    let body = req.body;
+    if (req.method !== "POST") {
 
-    if (typeof body === "string") {
-      try {
-        body = JSON.parse(body);
-      } catch {
-        return res.status(400).json({
+      return res
+        .status(405)
+        .json({
           ok: false,
-          error: "Invalid JSON request body."
+          error:
+            "Method not allowed."
         });
+    }
+
+
+    /*
+     * Parse request body
+     */
+
+    let body =
+      req.body;
+
+    if (
+      typeof body === "string"
+    ) {
+      try {
+        body =
+          JSON.parse(body);
+      } catch {
+        return res
+          .status(400)
+          .json({
+            ok: false,
+            error:
+              "Invalid JSON request body."
+          });
       }
     }
 
-    body = body || {};
 
-    const action = body.action;
+    const action =
+      body?.action;
 
-    // --------------------------------------------------------
-    // Validate action
-    // --------------------------------------------------------
 
-    if (!action) {
-      return res.status(400).json({
-        ok: false,
-        error: "Missing control action."
-      });
-    }
+    /*
+     * DEBUG
+     */
 
-    // --------------------------------------------------------
-    // Validate device ID before doing anything
-    // --------------------------------------------------------
-
-    getDeviceId();
-
-    // --------------------------------------------------------
-    // START CHARGING
-    // --------------------------------------------------------
-
-    if (action === "startCharging") {
-      const targetSoc =
-        body.targetSoc ??
-        body.soc ??
-        body.targetSOC ??
-        90;
-
-      const result =
-        await startCharging(targetSoc);
-
-      return res.status(200).json(result);
-    }
-
-    // --------------------------------------------------------
-    // RESTORE
-    // --------------------------------------------------------
-
-    if (action === "restore") {
-      const result =
-        await restoreDefaults(body);
-
-      return res.status(200).json(result);
-    }
-
-    // --------------------------------------------------------
-    // UNKNOWN ACTION
-    // --------------------------------------------------------
-
-    return res.status(400).json({
-      ok: false,
-
-      error: "Unknown control action.",
-
+    console.log(
+      "Control action:",
       action,
+      body
+    );
 
-      supportedActions: [
-        "startCharging",
-        "restore"
-      ]
-    });
+
+    /*
+     * START CHARGING
+     */
+
+    if (
+      action === "startCharging"
+    ) {
+
+      const result =
+        await startCharging();
+
+      return res
+        .status(200)
+        .json({
+          ok: true,
+          ...result
+        });
+    }
+
+
+    /*
+     * STOP CHARGING
+     */
+
+    if (
+      action === "stopCharging"
+    ) {
+
+      const result =
+        await stopCharging();
+
+      return res
+        .status(200)
+        .json({
+          ok: true,
+          ...result
+        });
+    }
+
+
+    /*
+     * SET CHARGING CURRENT
+     */
+
+    if (
+      action === "setChargingCurrent"
+    ) {
+
+      const result =
+        await setChargingCurrent(
+          body.current ??
+          body.value
+        );
+
+      return res
+        .status(200)
+        .json({
+          ok: true,
+          ...result
+        });
+    }
+
+
+    /*
+     * SET BATTERY CV
+     */
+
+    if (
+      action === "setBatteryCV"
+    ) {
+
+      const result =
+        await setBatteryCV(
+          body.voltage ??
+          body.value
+        );
+
+      return res
+        .status(200)
+        .json({
+          ok: true,
+          result
+        });
+    }
+
+
+    /*
+     * SET BATTERY FLOAT
+     */
+
+    if (
+      action === "setBatteryFloat"
+    ) {
+
+      const result =
+        await setBatteryFloat(
+          body.voltage ??
+          body.value
+        );
+
+      return res
+        .status(200)
+        .json({
+          ok: true,
+          result
+        });
+    }
+
+
+    /*
+     * GENERIC CONFIGURATION
+     */
+
+    if (
+      action === "setValue"
+    ) {
+
+      const result =
+        await setValue(
+          body.key,
+          body.value
+        );
+
+      return res
+        .status(200)
+        .json({
+          ok: true,
+          result
+        });
+    }
+
+
+    /*
+     * UNKNOWN ACTION
+     */
+
+    return res
+      .status(400)
+      .json({
+        ok: false,
+        error:
+          "Unknown control action.",
+        receivedAction:
+          action,
+        supportedActions: [
+          "startCharging",
+          "stopCharging",
+          "setChargingCurrent",
+          "setBatteryCV",
+          "setBatteryFloat",
+          "setValue"
+        ]
+      });
+
   } catch (error) {
+
     console.error(
-      "Solar control API error:",
+      "Solar control error:",
       error
     );
 
-    return res.status(500).json({
-      ok: false,
-
-      error:
-        error?.message ||
-        "Solar control request failed."
-    });
+    return res
+      .status(500)
+      .json({
+        ok: false,
+        error:
+          error?.message ||
+          "Solar control request failed."
+      });
   }
 }
