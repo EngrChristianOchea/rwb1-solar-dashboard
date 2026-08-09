@@ -236,7 +236,7 @@ async function getValidToken() {
 // ------------------------------------------------------------
 
 async function writeConfigWithToken(key, value, token) {
-  const deviceId = process.env.SISELI_DEVICE_ID;
+  const deviceId = process.env.DEVICE_ID;
 
   if (!deviceId) {
     throw new Error(
@@ -376,7 +376,7 @@ export default async function handler(req, res) {
       batterySoc
     } = req.body || {};
 
-    const deviceId = process.env.SISELI_DEVICE_ID;
+    const deviceId = process.env.DEVICE_ID;
 
     if (!deviceId) {
       throw new Error(
