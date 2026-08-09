@@ -1,4 +1,3 @@
-```javascript
 import dotenv from "dotenv";
 import CryptoJS from "crypto-js";
 
@@ -6,27 +5,24 @@ dotenv.config({ path: ".env.local" });
 
 const SISELI_BASE_URL = "https://solar.siseli.com";
 
-const OPEN_APP_ID = "rBrTRfAPXz";
-const ENCRYPTED_OPEN_APP_SECRET =
-  "I4D0KRr2339z3pQ/at91V9BpFAOe54DaTafwSm6suIQ=";
-
 const DEFAULT_GRID_SOC = 22;
 const DEFAULT_BATTERY_SOC = 35;
 
-// These are the actual SiSeli configuration attributes
-// confirmed from the browser requests.
-const UTILITY_SOC_KEY = "comebackUtilityModeSocPointUnderSBU";
-const BATTERY_SOC_KEY = "comebackBatteryModeSocPointUnderSBU";
+const OPEN_APP_ID = "rBrTRfAPXz";
+
+const ENCRYPTED_OPEN_APP_SECRET =
+  "I4D0KRr2339z3pQ/at91V9BpFAOe54DaTafwSm6suIQ=";
+
+// ------------------------------------------------------------
+// Dynamic Solar of Things token cache
+// ------------------------------------------------------------
 
 let cachedToken = null;
 let cachedTokenExpiry = 0;
 
-/*
- * =========================================================
- * OPEN API SIGNING
- * Same authentication mechanism used by solar.js
- * =========================================================
- */
+// ------------------------------------------------------------
+// Open API signing helpers
+// ------------------------------------------------------------
 
 function randomNonce(length = 32) {
   const chars =
@@ -83,9 +79,7 @@ function getBodyHash(method, bodyString) {
     return "";
   }
 
-  return CryptoJS.SHA256(
-    CryptoJS.enc.Utf8.parse(bodyString)
-  )
+  return CryptoJS.SHA256(CryptoJS.enc.Utf8.parse(bodyString))
     .toString()
     .toLowerCase();
 }
@@ -98,22 +92,23 @@ function makeOpenHeaders({ url, method, bodyString }) {
   const parsedUrl = new URL(url);
 
   for (const [key, value] of parsedUrl.searchParams.entries()) {
-    signParams[key] = value;
+    if (
+      key !== "IOT-Open-AppID" &&
+      key !== "IOT-Open-Nonce" &&
+      key !== "IOT-Open-Sign" &&
+      key !== "IOT-Open-Body-Hash"
+    ) {
+      signParams[key] = value;
+    }
   }
 
-  signParams["IOT-Open-Body-Hash"] = getBodyHash(
-    method,
-    bodyString
-  );
-
+  signParams["IOT-Open-Body-Hash"] = getBodyHash(method, bodyString);
   signParams["IOT-Open-AppID"] = OPEN_APP_ID;
   signParams["IOT-Open-Nonce"] = nonce;
 
   const sortedParams = sortObject(signParams);
 
-  const queryString = stringifyQueryNoEncode(
-    sortedParams
-  );
+  const queryString = stringifyQueryNoEncode(sortedParams);
 
   const queryBase64 = CryptoJS.enc.Base64.stringify(
     CryptoJS.enc.Utf8.parse(queryString)
@@ -124,14 +119,9 @@ function makeOpenHeaders({ url, method, bodyString }) {
     ENCRYPTED_OPEN_APP_SECRET
   );
 
-  const hmac = CryptoJS.HmacSHA256(
-    queryBase64,
-    openSecret
-  );
+  const hmac = CryptoJS.HmacSHA256(queryBase64, openSecret);
 
-  const sign = CryptoJS.MD5(hmac)
-    .toString()
-    .toLowerCase();
+  const sign = CryptoJS.MD5(hmac).toString().toLowerCase();
 
   return {
     "IOT-Open-AppID": OPEN_APP_ID,
@@ -140,12 +130,10 @@ function makeOpenHeaders({ url, method, bodyString }) {
   };
 }
 
-/*
- * =========================================================
- * LOGIN / DYNAMIC TOKEN
- * Same system used by solar.js
- * =========================================================
- */
+// ------------------------------------------------------------
+// Dynamic login
+// Same mechanism used by solar.js
+// ------------------------------------------------------------
 
 async function loginToSolarOfThings() {
   const account = process.env.SOT_ACCOUNT;
@@ -157,8 +145,7 @@ async function loginToSolarOfThings() {
     );
   }
 
-  const url =
-    `${SISELI_BASE_URL}/apis/login/account`;
+  const url = `${SISELI_BASE_URL}/apis/login/account`;
 
   const bodyString = JSON.stringify({
     account,
@@ -173,28 +160,20 @@ async function loginToSolarOfThings() {
 
   const response = await fetch(url, {
     method: "POST",
-
     headers: {
       Accept: "application/json",
       "Accept-Language": "en-US",
-      "Content-Type":
-        "application/json; charset=utf-8",
+      "Content-Type": "application/json; charset=utf-8",
 
       ...openHeaders,
 
       "IOT-Time-Zone": "Asia/Singapore",
       "IOT-Token": "null",
 
-      Origin:
-        "https://solar.siseli.com",
-
-      Referer:
-        "https://solar.siseli.com/",
-
-      "User-Agent":
-        "Mozilla/5.0"
+      Origin: "https://solar.siseli.com",
+      Referer: "https://solar.siseli.com/",
+      "User-Agent": "Mozilla/5.0"
     },
-
     body: bodyString
   });
 
@@ -205,23 +184,17 @@ async function loginToSolarOfThings() {
   try {
     json = text ? JSON.parse(text) : null;
   } catch {
-    throw new Error(
-      `Solar of Things login returned invalid JSON: ${text}`
-    );
+    json = null;
   }
 
   if (!response.ok || json?.code !== 0) {
     throw new Error(
-      json?.message ||
-        "Solar of Things login failed."
+      json?.message || "Solar of Things login failed."
     );
   }
 
-  const accessToken =
-    json?.data?.accessToken;
-
-  const expiresAt =
-    json?.data?.accessTokenWillExpiredAt;
+  const accessToken = json?.data?.accessToken;
+  const expiresAt = json?.data?.accessTokenWillExpiredAt;
 
   if (!accessToken) {
     throw new Error(
@@ -236,7 +209,8 @@ async function loginToSolarOfThings() {
     : Date.now() + 60 * 60 * 1000;
 
   console.log(
-    "SiSeli dynamic IoT token acquired."
+    "SiSeli dynamic token acquired. Expiry:",
+    new Date(cachedTokenExpiry).toISOString()
   );
 
   return accessToken;
@@ -245,11 +219,6 @@ async function loginToSolarOfThings() {
 async function getValidToken() {
   const now = Date.now();
 
-  /*
-   * Reuse the current token while it is still valid.
-   *
-   * Refresh 5 minutes before expiration.
-   */
   if (
     cachedToken &&
     now < cachedTokenExpiry - 5 * 60 * 1000
@@ -257,70 +226,48 @@ async function getValidToken() {
     return cachedToken;
   }
 
+  console.log("SiSeli token missing/expired. Logging in...");
+
   return await loginToSolarOfThings();
 }
 
-/*
- * =========================================================
- * WRITE CONFIGURATION
- * =========================================================
- */
+// ------------------------------------------------------------
+// Configuration writer
+// ------------------------------------------------------------
 
-async function writeConfig(
-  deviceId,
-  key,
-  value,
-  retry = true
-) {
-  let token = await getValidToken();
+async function writeConfigWithToken(key, value, token) {
+  const deviceId = process.env.DEVICE_ID;
+
+  if (!deviceId) {
+    throw new Error(
+      "Missing SISELI_DEVICE_ID environment variable."
+    );
+  }
 
   const url =
-    `${SISELI_BASE_URL}` +
-    `/apis/remote/device/config/write` +
+    `${SISELI_BASE_URL}/apis/remote/device/config/write` +
     `?deviceId=${encodeURIComponent(deviceId)}`;
 
-  const bodyString = JSON.stringify({
+  const body = {
     id: deviceId,
     key,
     value: String(value)
-  });
+  };
 
-  const openHeaders = makeOpenHeaders({
-    url,
+  const response = await fetch(url, {
     method: "POST",
-    bodyString
-  });
-
-  let response = await fetch(url, {
-    method: "POST",
-
     headers: {
       Accept: "application/json",
-      "Accept-Language": "en-US",
-      "Content-Type":
-        "application/json; charset=utf-8",
-
-      ...openHeaders,
-
-      "IOT-Time-Zone":
-        "Asia/Singapore",
-
+      "Content-Type": "application/json; charset=utf-8",
+      "IOT-Time-Zone": "Asia/Singapore",
       "IOT-Token": token,
-
-      Origin:
-        "https://solar.siseli.com",
-
-      Referer:
-        "https://solar.siseli.com/",
-
-      "User-Agent":
-        "Mozilla/5.0"
+      Origin: "https://solar.siseli.com",
+      Referer: "https://solar.siseli.com/"
     },
-
-    body: bodyString
+    body: JSON.stringify(body)
   });
 
-  let text = await response.text();
+  const text = await response.text();
 
   let data = null;
 
@@ -330,129 +277,90 @@ async function writeConfig(
     data = text;
   }
 
-  console.log("SiSeli config write:", {
+  console.log("SiSeli write:", {
     key,
     value,
     status: response.status,
     response: data
   });
 
-  /*
-   * If the token has expired unexpectedly,
-   * clear it and retry ONCE with a fresh token.
-   */
-  if (
-    retry &&
-    (
-      response.status === 401 ||
-      response.status === 403 ||
-      data?.code === 401 ||
-      data?.code === 403
-    )
-  ) {
-    console.log(
-      "SiSeli token appears expired. Refreshing token..."
-    );
-
-    cachedToken = null;
-    cachedTokenExpiry = 0;
-
-    return await writeConfig(
-      deviceId,
-      key,
-      value,
-      false
-    );
-  }
-
   if (!response.ok) {
-    throw new Error(
+    const error = new Error(
       data?.message ||
-        data?.error ||
         `SiSeli rejected ${key}=${value} (${response.status})`
     );
+
+    error.status = response.status;
+    error.responseData = data;
+
+    throw error;
   }
 
-  /*
-   * Some SiSeli endpoints may return HTTP 200
-   * but still report an API-level failure.
-   */
-  if (
-    data &&
-    typeof data === "object" &&
-    data.code !== undefined &&
-    data.code !== 0
-  ) {
-    throw new Error(
-      data.message ||
-        `SiSeli rejected configuration ${key}.`
-    );
+  if (data && typeof data === "object" && data.code !== undefined) {
+    if (Number(data.code) !== 0) {
+      const error = new Error(
+        data.message ||
+          `SiSeli rejected ${key}=${value}.`
+      );
+
+      error.status = response.status;
+      error.responseData = data;
+
+      throw error;
+    }
   }
 
   return data;
 }
 
-/*
- * =========================================================
- * WRITE BOTH SOC SETTINGS
- * =========================================================
- */
+// ------------------------------------------------------------
+// Write configuration using dynamic token
+// Automatically retries once after token refresh.
+// ------------------------------------------------------------
 
-async function setSocSettings(
-  deviceId,
-  utilitySoc,
-  batterySoc
-) {
-  const utilityValue = Math.min(
-    Math.max(Math.floor(Number(utilitySoc)), 0),
-    100
-  );
+async function writeConfig(key, value) {
+  let token = await getValidToken();
 
-  const batteryValue = Math.min(
-    Math.max(Math.floor(Number(batterySoc)), 1),
-    100
-  );
+  try {
+    return await writeConfigWithToken(key, value, token);
+  } catch (error) {
+    const status = Number(error?.status);
 
-  /*
-   * IMPORTANT:
-   *
-   * Utility SOC is written first.
-   * Battery SOC is written second.
-   *
-   * These are the exact attribute names confirmed
-   * from the SiSeli web application.
-   */
+    const message = String(error?.message || "").toLowerCase();
 
-  const utilityResult = await writeConfig(
-    deviceId,
-    UTILITY_SOC_KEY,
-    utilityValue
-  );
+    const tokenError =
+      status === 401 ||
+      status === 403 ||
+      message.includes("token") ||
+      message.includes("unauthorized") ||
+      message.includes("expired");
 
-  const batteryResult = await writeConfig(
-    deviceId,
-    BATTERY_SOC_KEY,
-    batteryValue
-  );
+    if (!tokenError) {
+      throw error;
+    }
 
-  return {
-    utilitySoc: utilityValue,
-    batterySoc: batteryValue,
-    utilityResult,
-    batteryResult
-  };
+    console.warn(
+      "SiSeli token appears invalid/expired. Refreshing token and retrying..."
+    );
+
+    cachedToken = null;
+    cachedTokenExpiry = 0;
+
+    token = await getValidToken();
+
+    return await writeConfigWithToken(
+      key,
+      value,
+      token
+    );
+  }
 }
 
-/*
- * =========================================================
- * API HANDLER
- * =========================================================
- */
+// ------------------------------------------------------------
+// API HANDLER
+// ------------------------------------------------------------
 
-export default async function handler(
-  req,
-  res
-) {
+export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({
       ok: false,
@@ -461,17 +369,6 @@ export default async function handler(
   }
 
   try {
-    const deviceId =
-      process.env.DEVICE_ID;
-
-    if (!deviceId) {
-      return res.status(500).json({
-        ok: false,
-        error:
-          "Missing DEVICE_ID in environment variables."
-      });
-    }
-
     const {
       action,
       currentSoc,
@@ -479,28 +376,29 @@ export default async function handler(
       batterySoc
     } = req.body || {};
 
-    /*
-     * =====================================================
-     * START MANUAL GRID CHARGING
-     * =====================================================
-     */
+    const deviceId = process.env.DEVICE_ID;
+
+    if (!deviceId) {
+      throw new Error(
+        "Missing SISELI_DEVICE_ID environment variable."
+      );
+    }
+
+    // --------------------------------------------------------
+    // START MANUAL GRID CHARGING
+    // --------------------------------------------------------
 
     if (action === "startCharging") {
       const current = Number(currentSoc);
-      const requestedUtilitySoc =
-        Number(utilitySoc);
+      const requestedUtilitySoc = Number(utilitySoc);
       const target = Number(batterySoc);
 
       if (!Number.isFinite(current)) {
-        throw new Error(
-          "Invalid current SOC."
-        );
+        throw new Error("Invalid current SOC.");
       }
 
       if (!Number.isFinite(target)) {
-        throw new Error(
-          "Invalid target SOC."
-        );
+        throw new Error("Invalid target SOC.");
       }
 
       if (target <= current) {
@@ -509,142 +407,167 @@ export default async function handler(
         );
       }
 
+      if (target > 100) {
+        throw new Error("Target SOC cannot exceed 100%.");
+      }
+
       /*
        * During manual charging:
        *
-       * Utility comeback SOC = current SOC
-       * Battery comeback SOC = target SOC
+       * Utility comeback:
+       *   Set to current SOC or lower.
+       *
+       * Battery comeback:
+       *   Set to user's target SOC.
        *
        * Example:
        *
-       * Current = 48%
-       * Utility = 48%
-       * Battery = 90%
+       * Current SOC = 48%
+       * Utility comeback = 48%
+       * Battery comeback = 90%
        *
-       * This allows the inverter to use utility
-       * until the battery reaches the requested
-       * target SOC.
+       * This forces the inverter to stay on/use utility
+       * until the battery reaches the requested target.
        */
 
-      const forcedUtilitySoc =
-        Math.min(
-          Math.floor(current),
-          Number.isFinite(
-            requestedUtilitySoc
-          )
-            ? Math.floor(
-                requestedUtilitySoc
-              )
-            : DEFAULT_GRID_SOC
-        );
+      const forcedUtilitySoc = Math.min(
+        Math.floor(current),
+        Number.isFinite(requestedUtilitySoc)
+          ? Math.floor(requestedUtilitySoc)
+          : DEFAULT_GRID_SOC
+      );
 
-      const forcedBatterySoc =
-        Math.min(
-          Math.max(
-            Math.floor(target),
-            1
-          ),
-          100
-        );
+      const forcedBatterySoc = Math.min(
+        Math.max(Math.floor(target), 1),
+        100
+      );
 
-      const result =
-        await setSocSettings(
-          deviceId,
-          forcedUtilitySoc,
-          forcedBatterySoc
-        );
+      console.log(
+        "Starting manual charging:",
+        {
+          currentSoc: current,
+          utilitySoc: forcedUtilitySoc,
+          targetSoc: forcedBatterySoc
+        }
+      );
+
+      // FIRST: utility comeback threshold
+      const utilityResult = await writeConfig(
+        "comebackUtilityModeSocPointUnderSBU",
+        forcedUtilitySoc
+      );
+
+      // SECOND: battery comeback threshold
+      const batteryResult = await writeConfig(
+        "comebackBatteryModeSocPoint",
+        forcedBatterySoc
+      );
+
+      /*
+       * IMPORTANT:
+       * Do NOT restore defaults here.
+       *
+       * Defaults:
+       *   Utility = 22%
+       *   Battery = 35%
+       *
+       * Restoring immediately would cancel the manual
+       * charging configuration.
+       */
 
       return res.status(200).json({
         ok: true,
-
-        action:
-          "startCharging",
+        action: "startCharging",
 
         currentSoc: current,
 
-        utilitySoc:
-          result.utilitySoc,
+        utilitySoc: forcedUtilitySoc,
 
-        batterySoc:
-          result.batterySoc,
+        batterySoc: forcedBatterySoc,
 
-        utilityResult:
-          result.utilityResult,
+        utilityResult,
 
-        batteryResult:
-          result.batteryResult,
+        batteryResult,
 
         message:
-          `Manual grid charging configured. ` +
-          `Utility comeback: ${result.utilitySoc}%. ` +
-          `Target battery SOC: ${result.batterySoc}%.`
+          `Manual grid charging started. ` +
+          `Utility comeback set to ${forcedUtilitySoc}% ` +
+          `and battery target set to ${forcedBatterySoc}%.`
       });
     }
 
-    /*
-     * =====================================================
-     * RESTORE DEFAULT SETTINGS
-     * =====================================================
-     */
+    // --------------------------------------------------------
+    // RESTORE DEFAULT SETTINGS
+    // --------------------------------------------------------
 
     if (action === "restore") {
-      const restoreUtilitySoc =
-        Number.isFinite(
-          Number(utilitySoc)
-        )
-          ? Number(utilitySoc)
-          : DEFAULT_GRID_SOC;
+      const restoreUtilitySoc = Number.isFinite(
+        Number(utilitySoc)
+      )
+        ? Math.min(
+            Math.max(Math.floor(Number(utilitySoc)), 0),
+            100
+          )
+        : DEFAULT_GRID_SOC;
 
-      const restoreBatterySoc =
-        Number.isFinite(
-          Number(batterySoc)
-        )
-          ? Number(batterySoc)
-          : DEFAULT_BATTERY_SOC;
+      const restoreBatterySoc = Number.isFinite(
+        Number(batterySoc)
+      )
+        ? Math.min(
+            Math.max(Math.floor(Number(batterySoc)), 0),
+            100
+          )
+        : DEFAULT_BATTERY_SOC;
 
-      const result =
-        await setSocSettings(
-          deviceId,
-          restoreUtilitySoc,
-          restoreBatterySoc
-        );
+      console.log(
+        "Restoring inverter defaults:",
+        {
+          utilitySoc: restoreUtilitySoc,
+          batterySoc: restoreBatterySoc
+        }
+      );
+
+      /*
+       * Restore utility first.
+       */
+
+      const utilityResult = await writeConfig(
+        "comebackUtilityModeSocPointUnderSBU",
+        restoreUtilitySoc
+      );
+
+      /*
+       * Restore battery second.
+       */
+
+      const batteryResult = await writeConfig(
+        "comebackBatteryModeSocPoint",
+        restoreBatterySoc
+      );
 
       return res.status(200).json({
         ok: true,
-
         action: "restore",
 
-        utilitySoc:
-          result.utilitySoc,
+        utilitySoc: restoreUtilitySoc,
 
-        batterySoc:
-          result.batterySoc,
+        batterySoc: restoreBatterySoc,
 
-        utilityResult:
-          result.utilityResult,
+        utilityResult,
 
-        batteryResult:
-          result.batteryResult,
+        batteryResult,
 
         message:
-          `Default SOC settings restored. ` +
-          `Utility comeback: ${result.utilitySoc}%. ` +
-          `Battery comeback: ${result.batterySoc}%.`
+          `Inverter SOC settings restored: ` +
+          `Utility ${restoreUtilitySoc}%, ` +
+          `Battery ${restoreBatterySoc}%.`
       });
     }
 
-    /*
-     * =====================================================
-     * UNKNOWN ACTION
-     * =====================================================
-     */
-
     return res.status(400).json({
       ok: false,
-      error:
-        `Unknown control action: ${action}`
+      error: `Unknown control action: ${action}`
     });
-
   } catch (error) {
     console.error(
       "SiSeli control error:",
@@ -659,4 +582,3 @@ export default async function handler(
     });
   }
 }
-```
